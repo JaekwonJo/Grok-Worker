@@ -39,7 +39,6 @@ class GrokWorkerApp:
 
     def _build_vars(self) -> None:
         self.worker_name_var = tk.StringVar()
-        self.project_var = tk.StringVar()
         self.prompt_slot_var = tk.StringVar()
         self.reference_image_dir_var = tk.StringVar()
         self.download_dir_var = tk.StringVar()
@@ -52,7 +51,7 @@ class GrokWorkerApp:
         self.humanize_typing_var = tk.BooleanVar()
         self.status_var = tk.StringVar(value="준비 완료")
         self.progress_var = tk.StringVar(value="0 / 0 (0.0%)")
-        self.project_summary_var = tk.StringVar(value="프로젝트: -")
+        self.project_summary_var = tk.StringVar(value="사이트: grok.com/imagine")
         self.queue_summary_var = tk.StringVar(value="활성 0개 | 완료 0 | 실패 0 | 대기 0")
         self.prompt_file_summary_var = tk.StringVar(value="")
 
@@ -245,10 +244,7 @@ class GrokWorkerApp:
         combo.configure(font=("Malgun Gothic", 10), bg="#f0ede4", width=38, highlightthickness=0)
         combo.pack(fill="x", pady=(6, 0))
         variable.trace_add("write", lambda *_: callback())
-        if label == "프로젝트":
-            self.project_menu = combo
-        else:
-            self.prompt_menu = combo
+        self.prompt_menu = combo
 
     def _path_row(self, parent: tk.Frame, label: str, variable: tk.StringVar, command) -> None:
         row = tk.Frame(parent, bg="#1a2f4f")
@@ -278,11 +274,8 @@ class GrokWorkerApp:
 
     def _load_vars_from_config(self) -> None:
         self.worker_name_var.set(str(self.cfg.get("worker_name") or "Grok_워커1"))
-        projects = self.cfg.get("project_profiles") or []
         slots = self.cfg.get("prompt_slots") or []
-        project_index = max(0, min(int(self.cfg.get("project_index", 0) or 0), len(projects) - 1))
         slot_index = max(0, min(int(self.cfg.get("prompt_slot_index", 0) or 0), len(slots) - 1))
-        self.project_var.set(str((projects[project_index] or {}).get("name") or ""))
         self.prompt_slot_var.set(str((slots[slot_index] or {}).get("name") or ""))
         self.reference_image_dir_var.set(str(self.cfg.get("reference_image_dir") or ""))
         self.download_dir_var.set(str(self.cfg.get("download_output_dir") or ""))
@@ -295,7 +288,6 @@ class GrokWorkerApp:
         self.humanize_typing_var.set(bool(self.cfg.get("humanize_typing", True)))
 
     def _write_vars_to_config(self) -> None:
-        projects = self.cfg.get("project_profiles") or []
         slots = self.cfg.get("prompt_slots") or []
         self.cfg["worker_name"] = self.worker_name_var.get().strip() or "Grok_워커1"
         self.cfg["reference_image_dir"] = self.reference_image_dir_var.get().strip()
@@ -308,12 +300,7 @@ class GrokWorkerApp:
         self.cfg["typing_speed"] = round(float(self.typing_speed_var.get() or 1.0), 1)
         self.cfg["humanize_typing"] = bool(self.humanize_typing_var.get())
 
-        project_name = self.project_var.get().strip()
         slot_name = self.prompt_slot_var.get().strip()
-        for idx, project in enumerate(projects):
-            if str(project.get("name") or "").strip() == project_name:
-                self.cfg["project_index"] = idx
-                break
         for idx, slot in enumerate(slots):
             if str(slot.get("name") or "").strip() == slot_name:
                 self.cfg["prompt_slot_index"] = idx
@@ -333,17 +320,13 @@ class GrokWorkerApp:
         self.refresh_summary_only()
 
     def refresh_all(self) -> None:
-        self._refresh_project_menu()
         self._refresh_prompt_menu()
         self.on_number_mode_changed()
         self.refresh_summary_only()
         self._render_queue()
 
     def refresh_summary_only(self) -> None:
-        projects = self.cfg.get("project_profiles") or []
-        project_idx = int(self.cfg.get("project_index", 0) or 0)
-        project_name = str((projects[project_idx] or {}).get("name") or "-") if projects else "-"
-        self.project_summary_var.set(f"프로젝트: {project_name}")
+        self.project_summary_var.set("사이트: grok.com/imagine")
         slots = self.cfg.get("prompt_slots") or []
         slot_idx = int(self.cfg.get("prompt_slot_index", 0) or 0)
         if slots:
@@ -360,15 +343,6 @@ class GrokWorkerApp:
         self._refresh_queue_summary()
         self._refresh_progress_display()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok_워커1')}")
-
-    def _refresh_project_menu(self) -> None:
-        menu = self.project_menu["menu"]
-        menu.delete(0, "end")
-        values = [str(project.get("name") or "") for project in self.cfg.get("project_profiles") or []]
-        for value in values:
-            menu.add_command(label=value, command=lambda v=value: self.project_var.set(v))
-        if values and self.project_var.get() not in values:
-            self.project_var.set(values[0])
 
     def _refresh_prompt_menu(self) -> None:
         menu = self.prompt_menu["menu"]
@@ -388,62 +362,9 @@ class GrokWorkerApp:
         self.manual_entry.configure(state=state_manual)
         self.auto_save("번호 방식 변경")
 
-    def project_changed(self) -> None:
-        if self.project_var.get().strip():
-            self.auto_save("프로젝트 선택 변경")
-
     def prompt_slot_changed(self) -> None:
         if self.prompt_slot_var.get().strip():
             self.auto_save("프롬프트 파일 선택 변경")
-
-    def add_project(self) -> None:
-        name = simpledialog.askstring("프로젝트 추가", "프로젝트 이름을 입력하세요:", parent=self.root)
-        if not name:
-            return
-        url = simpledialog.askstring("프로젝트 URL", "프로젝트 URL을 입력하세요:", parent=self.root, initialvalue="https://grok.com/imagine")
-        if not url:
-            return
-        self.cfg.setdefault("project_profiles", []).append({"name": name.strip(), "url": url.strip()})
-        self.project_var.set(name.strip())
-        self.auto_save("프로젝트 추가")
-        self.refresh_all()
-
-    def rename_project(self) -> None:
-        current = self.project_var.get().strip()
-        if not current:
-            return
-        new_name = simpledialog.askstring("프로젝트 이름 변경", "새 프로젝트 이름을 입력하세요:", parent=self.root, initialvalue=current)
-        if not new_name:
-            return
-        for project in self.cfg.get("project_profiles") or []:
-            if str(project.get("name") or "").strip() == current:
-                project["name"] = new_name.strip()
-                break
-        self.project_var.set(new_name.strip())
-        self.auto_save("프로젝트 이름 변경")
-        self.refresh_all()
-
-    def edit_project_url(self) -> None:
-        current = self.project_var.get().strip()
-        if not current:
-            return
-        project = self._current_project()
-        url = simpledialog.askstring("URL 편집", "프로젝트 URL을 입력하세요:", parent=self.root, initialvalue=str(project.get("url") or ""))
-        if not url:
-            return
-        project["url"] = url.strip()
-        self.auto_save("프로젝트 URL 변경")
-
-    def delete_project(self) -> None:
-        current = self.project_var.get().strip()
-        profiles = self.cfg.get("project_profiles") or []
-        if len(profiles) <= 1:
-            messagebox.showwarning("삭제 불가", "프로젝트는 최소 1개는 남아 있어야 합니다.", parent=self.root)
-            return
-        self.cfg["project_profiles"] = [project for project in profiles if str(project.get("name") or "").strip() != current]
-        self.project_var.set(str((self.cfg["project_profiles"][0] or {}).get("name") or ""))
-        self.auto_save("프로젝트 삭제")
-        self.refresh_all()
 
     def add_prompt_file(self) -> None:
         name = simpledialog.askstring("프롬프트 파일 추가", "프롬프트 파일 이름을 입력하세요:", parent=self.root)
@@ -550,8 +471,7 @@ class GrokWorkerApp:
 
     def open_browser_window(self) -> None:
         self._write_vars_to_config()
-        project = self._current_project()
-        url = str(project.get("url") or self.cfg.get("grok_site_url") or "https://grok.com/imagine")
+        url = str(self.cfg.get("grok_site_url") or "https://grok.com/imagine")
         profile_dir = str(self.cfg.get("browser_profile_dir") or (self.base_dir / "runtime" / "browser_profile_1"))
         self.browser.open_project(url, profile_dir)
 
@@ -705,13 +625,6 @@ class GrokWorkerApp:
         self.log_text.insert("end", "\n".join(self.log_lines))
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
-
-    def _current_project(self) -> dict:
-        current = self.project_var.get().strip()
-        for project in self.cfg.get("project_profiles") or []:
-            if str(project.get("name") or "").strip() == current:
-                return project
-        return (self.cfg.get("project_profiles") or [{}])[0]
 
     def _current_prompt_slot(self) -> dict:
         current = self.prompt_slot_var.get().strip()
