@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Grok Worker Extension",
+  "description": "Grok Imagine 전용 레퍼런스 이미지 + 프롬프트 자동화 확장 프로그램",
+  "version": "0.1.0",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "sidePanel",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://grok.com/*",
+    "https://accounts.x.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Grok Worker"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://grok.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

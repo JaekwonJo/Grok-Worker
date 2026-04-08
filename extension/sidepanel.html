@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grok Worker Extension</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero">
+        <div>
+          <h1>Grok Worker</h1>
+          <p>Grok Imagine 전용 확장 프로그램</p>
+        </div>
+        <div class="hero-status">
+          <span id="runBadge" class="badge idle">준비 완료</span>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>실행 설정</h2>
+          <button id="saveSettingsBtn" class="ghost-btn">저장</button>
+        </div>
+        <div class="grid two">
+          <label class="field">
+            <span>저장 폴더명</span>
+            <input id="saveSubfolderInput" type="text" placeholder="Grok" />
+          </label>
+          <label class="field">
+            <span>타이핑 속도</span>
+            <input id="typingSpeedInput" type="range" min="0.5" max="2" step="0.1" />
+            <strong id="typingSpeedValue">1.0</strong>
+          </label>
+        </div>
+        <label class="checkbox">
+          <input id="humanLikeTypingInput" type="checkbox" />
+          <span>인간처럼 입력하기</span>
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>레퍼런스 이미지 라이브러리</h2>
+          <label class="upload-btn">
+            이미지 추가
+            <input id="referenceUploadInput" type="file" accept="image/*" multiple hidden />
+          </label>
+        </div>
+        <p class="hint">여기서 이미지 이름을 `S999`, `S998`처럼 저장해 두면, 프롬프트 안의 `@S999`, `@S998`를 자동으로 찾아 첨부합니다.</p>
+        <div id="referenceList" class="reference-list"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>번호 설정</h2>
+        </div>
+        <div class="inline-options">
+          <label class="radio"><input type="radio" name="numberMode" value="range" checked />연속</label>
+          <label class="radio"><input type="radio" name="numberMode" value="manual" />개별</label>
+        </div>
+        <div class="grid two compact">
+          <label class="field">
+            <span>시작</span>
+            <input id="startNumberInput" type="number" min="1" value="1" />
+          </label>
+          <label class="field">
+            <span>끝</span>
+            <input id="endNumberInput" type="number" min="1" value="1" />
+          </label>
+        </div>
+        <label class="field">
+          <span>개별 번호</span>
+          <input id="manualNumbersInput" type="text" placeholder="001,003,005-008" />
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>프롬프트</h2>
+          <label class="ghost-btn upload-inline">
+            txt 불러오기
+            <input id="promptFileInput" type="file" accept=".txt,text/plain" hidden />
+          </label>
+        </div>
+        <p class="hint">형식은 `001 : @S999 sits, @S998 stands. |||` 처럼 쓰시면 됩니다.</p>
+        <textarea id="promptTextInput" rows="10" placeholder="001 : @S999 sits, @S998 stands.&#10;|||&#10;&#10;002 : dramatic lighting...&#10;|||"></textarea>
+      </section>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>실행</h2>
+          <div class="button-row">
+            <button id="stopBtn" class="ghost-btn">중지</button>
+            <button id="startBtn" class="primary-btn">시작</button>
+          </div>
+        </div>
+        <p class="hint">실행 전에 반드시 현재 탭이 `grok.com/imagine`인지 확인해 주세요.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>대기열</h2>
+          <div class="button-row">
+            <button id="copyFailedBtn" class="ghost-btn">실패 번호 복붙</button>
+          </div>
+        </div>
+        <div id="summaryBar" class="summary-bar">활성 0개 | 완료 0 | 실패 0 | 대기 0</div>
+        <div id="queueList" class="queue-list"></div>
+      </section>
+    </div>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

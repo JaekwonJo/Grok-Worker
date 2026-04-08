@@ -1,0 +1,267 @@
+import { getReferenceByAlias } from "./lib/ref-db.js";
+
+const SETTINGS_KEY = "grokWorkerExtensionSettings";
+const RUN_STATE_KEY = "grokWorkerExtensionRunState";
+
+let currentSession = null;
+let pendingDownload = null;
+
+chrome.runtime.onInstalled.addListener(async () => {
+  try {
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } catch (error) {
+    console.warn("sidePanel init failed", error);
+  }
+  const stored = await chrome.storage.local.get([SETTINGS_KEY, RUN_STATE_KEY]);
+  if (!stored[SETTINGS_KEY]) {
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: defaultSettings()
+    });
+  }
+  if (!stored[RUN_STATE_KEY]) {
+    await chrome.storage.local.set({
+      [RUN_STATE_KEY]: emptyRunState()
+    });
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  if (message.type === "grok-extension:start-run") {
+    startRun(message.payload)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+  if (message.type === "grok-extension:stop-run") {
+    stopRun().then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+  if (message.type === "grok-extension:prepare-download-name") {
+    pendingDownload = {
+      fileName: message.payload?.fileName || "",
+      subfolder: message.payload?.subfolder || "",
+      createdAt: Date.now()
+    };
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === "grok-extension:get-run-state") {
+    chrome.storage.local.get([RUN_STATE_KEY]).then((stored) => {
+      sendResponse({ ok: true, state: stored[RUN_STATE_KEY] || emptyRunState() });
+    });
+    return true;
+  }
+  return false;
+});
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  if (!pendingDownload) {
+    suggest();
+    return;
+  }
+  const ageMs = Date.now() - Number(pendingDownload.createdAt || 0);
+  if (ageMs > 30000) {
+    pendingDownload = null;
+    suggest();
+    return;
+  }
+  const targetName = sanitizeRelativePath(
+    `${pendingDownload.subfolder ? `${pendingDownload.subfolder}/` : ""}${pendingDownload.fileName}`
+  );
+  pendingDownload = null;
+  if (!targetName) {
+    suggest();
+    return;
+  }
+  suggest({ filename: targetName, conflictAction: "uniquify" });
+});
+
+async function startRun(payload) {
+  if (currentSession?.running) {
+    throw new Error("이미 실행 중입니다.");
+  }
+  const tabId = await resolveTargetTab(payload?.tabId);
+  const settings = payload?.settings || defaultSettings();
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!items.length) {
+    throw new Error("실행할 프롬프트가 없습니다.");
+  }
+
+  currentSession = {
+    running: true,
+    stopRequested: false,
+    tabId,
+    settings,
+    items
+  };
+
+  const initialState = {
+    running: true,
+    currentTag: "",
+    progressCurrent: 0,
+    progressTotal: items.length,
+    successCount: 0,
+    failedCount: 0,
+    failedNumbers: [],
+    queue: items.map((item) => ({
+      number: item.number,
+      tag: item.tag,
+      status: "pending",
+      message: ""
+    }))
+  };
+  await setRunState(initialState);
+
+  for (let index = 0; index < items.length; index += 1) {
+    if (!currentSession || currentSession.stopRequested) {
+      break;
+    }
+    const item = items[index];
+    await patchRunState((state) => {
+      state.currentTag = item.tag;
+      state.progressCurrent = index;
+      const row = state.queue.find((entry) => entry.number === item.number);
+      if (row) {
+        row.status = "running";
+        row.message = `${item.tag} 실행 중`;
+      }
+      return state;
+    });
+
+    try {
+      const references = await collectReferences(item.referenceNames);
+      if (item.referenceNames.length && references.length !== new Set(item.referenceNames.map((name) => String(name).toLowerCase())).size) {
+        throw new Error("레퍼런스 이미지 라이브러리에서 일부 이름을 찾지 못했습니다.");
+      }
+      const response = await chrome.tabs.sendMessage(tabId, {
+        type: "grok-extension:run-item",
+        payload: {
+          item,
+          settings,
+          references
+        }
+      });
+      if (!response?.ok) {
+        throw new Error(response?.error || "알 수 없는 실행 오류");
+      }
+      await patchRunState((state) => {
+        state.progressCurrent = index + 1;
+        state.successCount += 1;
+        const row = state.queue.find((entry) => entry.number === item.number);
+        if (row) {
+          row.status = "success";
+          row.message = response.result?.savedAs ? `저장: ${response.result.savedAs}` : "성공";
+        }
+        return state;
+      });
+    } catch (error) {
+      await patchRunState((state) => {
+        state.progressCurrent = index + 1;
+        state.failedCount += 1;
+        state.failedNumbers.push(item.number);
+        const row = state.queue.find((entry) => entry.number === item.number);
+        if (row) {
+          row.status = "failed";
+          row.message = error?.message || String(error);
+        }
+        return state;
+      });
+    }
+  }
+
+  await patchRunState((state) => {
+    state.running = false;
+    state.currentTag = "";
+    return state;
+  });
+  currentSession = null;
+  return { ok: true };
+}
+
+async function stopRun() {
+  if (currentSession) {
+    currentSession.stopRequested = true;
+  }
+  await patchRunState((state) => {
+    state.running = false;
+    state.currentTag = "";
+    return state;
+  });
+}
+
+async function resolveTargetTab(explicitTabId) {
+  if (Number.isInteger(explicitTabId)) {
+    return explicitTabId;
+  }
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const active = tabs.find((tab) => /^https:\/\/grok\.com\//.test(tab.url || ""));
+  if (!active?.id) {
+    throw new Error("현재 창의 활성 탭이 grok.com 페이지가 아닙니다.");
+  }
+  return active.id;
+}
+
+async function collectReferences(referenceNames) {
+  const wanted = [...new Set((referenceNames || []).map((name) => String(name).trim()).filter(Boolean))];
+  const result = [];
+  for (const name of wanted) {
+    const found = await getReferenceByAlias(name);
+    if (found) {
+      result.push(found);
+    }
+  }
+  return result;
+}
+
+function defaultSettings() {
+  return {
+    saveSubfolder: "Grok",
+    promptText: "",
+    numberMode: "range",
+    startNumber: 1,
+    endNumber: 1,
+    manualNumbers: "",
+    typingSpeed: 1,
+    humanLikeTyping: true
+  };
+}
+
+function emptyRunState() {
+  return {
+    running: false,
+    currentTag: "",
+    progressCurrent: 0,
+    progressTotal: 0,
+    successCount: 0,
+    failedCount: 0,
+    failedNumbers: [],
+    queue: []
+  };
+}
+
+async function setRunState(state) {
+  await chrome.storage.local.set({
+    [RUN_STATE_KEY]: state
+  });
+}
+
+async function patchRunState(mutator) {
+  const stored = await chrome.storage.local.get([RUN_STATE_KEY]);
+  const state = structuredClone(stored[RUN_STATE_KEY] || emptyRunState());
+  const next = mutator(state) || state;
+  await setRunState(next);
+}
+
+function sanitizeRelativePath(raw) {
+  return String(raw || "")
+    .replace(/^[\\/]+/, "")
+    .replace(/[<>:"|?*\u0000-\u001F]/g, "_")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+}
