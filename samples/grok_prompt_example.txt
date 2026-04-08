@@ -1,0 +1,11 @@
+001 : @1 cute 3d pixar boy, cinematic lighting, clean background
+|||
+
+002 : @1 @2 same character, shocked expression, warm top light
+|||
+
+003 :
+@1 same person, dramatic close up, glossy 3d render
+background only from @2
+|||
+

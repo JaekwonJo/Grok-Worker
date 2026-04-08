@@ -1,0 +1,12 @@
+__pycache__/
+.venv/
+.pytest_cache/
+playwright_cache/
+logs/
+downloads/
+runtime/
+config.local.json
+*.pyc
+*.pyo
+*.pyd
+
