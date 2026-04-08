@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
@@ -19,6 +21,9 @@ class GrokWorkerApp:
         self.browser = BrowserManager(self.log)
         self.queue_items: list[QueueItem] = []
         self.log_lines: list[str] = []
+        self.run_thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
 
         self.root = tk.Tk()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok_워커1')}")
@@ -549,29 +554,41 @@ class GrokWorkerApp:
         self.browser.open_project(url, profile_dir)
 
     def start_run(self) -> None:
+        if self.run_thread and self.run_thread.is_alive():
+            messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다.", parent=self.root)
+            return
         self._write_vars_to_config()
+        save_config(self.base_dir, self.cfg)
         plan = GrokAutomationEngine(self.base_dir, self.cfg).build_plan()
         self.queue_items = [
             QueueItem(number=item.number, tag=item.tag, prompt=item.rendered_prompt, status="pending", message=item.body)
             for item in plan.items
         ]
-        self.status_var.set("1차 UI 준비 완료 | 실제 Grok 자동화 연결 전")
         self.log(f"작업 준비: {plan.selection_summary}")
-        if self.queue_items:
-            self.log(f"예시 입력: {self.queue_items[0].prompt}")
         self._render_queue()
         self._refresh_progress_display()
+        if not self.queue_items:
+            self.status_var.set("선택된 작업 없음")
+            return
+        self.stop_event.clear()
+        self.pause_event.clear()
+        self.status_var.set("작업 시작")
+        self.run_thread = threading.Thread(target=self._run_plan_thread, args=(plan,), daemon=True)
+        self.run_thread.start()
 
     def stop_all(self) -> None:
+        self.stop_event.set()
+        self.pause_event.clear()
         self.browser.stop()
-        self.status_var.set("준비 완료")
         self.log("완전정지 요청")
 
     def pause_run(self) -> None:
+        self.pause_event.set()
         self.status_var.set("일시정지")
         self.log("일시정지")
 
     def resume_run(self) -> None:
+        self.pause_event.clear()
         self.status_var.set("재개")
         self.log("재개")
 
@@ -708,10 +725,52 @@ class GrokWorkerApp:
             return default
 
     def on_close(self) -> None:
+        self.stop_event.set()
+        self.pause_event.clear()
         self._write_vars_to_config()
         save_config(self.base_dir, self.cfg)
         self.browser.stop()
         self.root.destroy()
+
+    def _run_plan_thread(self, plan) -> None:
+        engine = GrokAutomationEngine(self.base_dir, self.cfg)
+        try:
+            engine.run(
+                plan=plan,
+                log=self._thread_log,
+                set_status=self._thread_status,
+                update_queue=self._thread_queue_update,
+                should_stop=self.stop_event.is_set,
+                wait_if_paused=self._thread_wait_if_paused,
+            )
+        except Exception as exc:
+            self._thread_log(f"❌ 실행 오류: {exc}")
+            self._thread_status("실행 오류")
+        finally:
+            self.root.after(0, self._render_queue)
+            self.root.after(0, self._refresh_progress_display)
+
+    def _thread_wait_if_paused(self) -> None:
+        while self.pause_event.is_set() and not self.stop_event.is_set():
+            time.sleep(0.2)
+
+    def _thread_log(self, message: str) -> None:
+        self.root.after(0, lambda m=message: self.log(m))
+
+    def _thread_status(self, text: str) -> None:
+        self.root.after(0, lambda t=text: self.status_var.set(t))
+
+    def _thread_queue_update(self, number: int, status: str, message: str, file_name: str) -> None:
+        def _apply():
+            for item in self.queue_items:
+                if item.number == number:
+                    item.status = status
+                    item.message = message
+                    item.file_name = file_name
+                    break
+            self._render_queue()
+            self._refresh_progress_display()
+        self.root.after(0, _apply)
 
     def run(self) -> None:
         self.root.mainloop()
