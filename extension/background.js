@@ -5,6 +5,7 @@ const RUN_STATE_KEY = "grokWorkerExtensionRunState";
 
 let currentSession = null;
 let pendingDownload = null;
+const zoomStateByTab = new Map();
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
@@ -47,6 +48,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     };
     sendResponse({ ok: true });
     return false;
+  }
+  if (message.type === "grok-extension:set-zoom") {
+    setTabZoom(message.payload, sender)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
+  }
+  if (message.type === "grok-extension:restore-zoom") {
+    restoreTabZoom(message.payload, sender)
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+    return true;
   }
   if (message.type === "grok-extension:get-run-state") {
     chrome.storage.local.get([RUN_STATE_KEY]).then((stored) => {
@@ -97,6 +110,8 @@ async function startRun(payload) {
     settings,
     items
   };
+
+  await ensureZoomForRun(tabId, settings);
 
   const initialState = {
     running: true,
@@ -184,6 +199,7 @@ async function startRun(payload) {
 async function stopRun() {
   if (currentSession) {
     currentSession.stopRequested = true;
+    await restoreZoomForTab(currentSession.tabId);
   }
   await patchRunState((state) => {
     state.running = false;
@@ -246,6 +262,61 @@ async function setRunState(state) {
   await chrome.storage.local.set({
     [RUN_STATE_KEY]: state
   });
+}
+
+async function ensureZoomForRun(tabId, settings) {
+  const zoomFactor = Number(settings.zoomFactor || 0.8);
+  if (!tabId || !Number.isFinite(zoomFactor) || zoomFactor <= 0) {
+    return;
+  }
+  try {
+    if (!zoomStateByTab.has(tabId)) {
+      const currentZoom = await chrome.tabs.getZoom(tabId);
+      zoomStateByTab.set(tabId, currentZoom);
+    }
+    await chrome.tabs.setZoom(tabId, zoomFactor);
+  } catch (error) {
+    console.warn("setZoom failed", error);
+  }
+}
+
+async function setTabZoom(payload, sender) {
+  const tabId = Number(payload?.tabId || sender?.tab?.id || 0);
+  const zoomFactor = Number(payload?.zoomFactor || 0.8);
+  if (!tabId) {
+    throw new Error("탭 ID가 없습니다.");
+  }
+  if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
+    throw new Error("잘못된 줌 값입니다.");
+  }
+  if (!zoomStateByTab.has(tabId)) {
+    const currentZoom = await chrome.tabs.getZoom(tabId);
+    zoomStateByTab.set(tabId, currentZoom);
+  }
+  await chrome.tabs.setZoom(tabId, zoomFactor);
+  return { tabId, zoomFactor };
+}
+
+async function restoreTabZoom(payload, sender) {
+  const tabId = Number(payload?.tabId || sender?.tab?.id || 0);
+  if (!tabId) {
+    throw new Error("탭 ID가 없습니다.");
+  }
+  await restoreZoomForTab(tabId);
+  return { tabId };
+}
+
+async function restoreZoomForTab(tabId) {
+  if (!zoomStateByTab.has(tabId)) {
+    return;
+  }
+  const previous = zoomStateByTab.get(tabId);
+  zoomStateByTab.delete(tabId);
+  try {
+    await chrome.tabs.setZoom(tabId, previous);
+  } catch (error) {
+    console.warn("restore zoom failed", error);
+  }
 }
 
 async function patchRunState(mutator) {

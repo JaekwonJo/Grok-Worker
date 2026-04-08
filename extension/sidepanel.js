@@ -21,6 +21,7 @@ function bindElements() {
     "saveSubfolderInput",
     "typingSpeedInput",
     "typingSpeedValue",
+    "zoomFactorSelect",
     "humanLikeTypingInput",
     "referenceUploadInput",
     "referenceList",
@@ -47,6 +48,7 @@ function bindEvents() {
   });
   els.saveSubfolderInput.addEventListener("change", () => void saveSettings());
   els.humanLikeTypingInput.addEventListener("change", () => void saveSettings());
+  els.zoomFactorSelect.addEventListener("change", () => void saveSettings());
   document.querySelectorAll("input[name='numberMode']").forEach((node) => {
     node.addEventListener("change", () => void saveSettings());
   });
@@ -71,6 +73,7 @@ async function loadSettings() {
     startNumber: 1,
     endNumber: 1,
     manualNumbers: "",
+    zoomFactor: 0.8,
     typingSpeed: 1,
     humanLikeTyping: true,
     ...(stored[SETTINGS_KEY] || {})
@@ -78,6 +81,7 @@ async function loadSettings() {
   els.saveSubfolderInput.value = settings.saveSubfolder || "Grok";
   els.typingSpeedInput.value = String(settings.typingSpeed || 1);
   els.typingSpeedValue.textContent = Number(settings.typingSpeed || 1).toFixed(1);
+  els.zoomFactorSelect.value = String(settings.zoomFactor || 0.8);
   els.humanLikeTypingInput.checked = Boolean(settings.humanLikeTyping);
   document.querySelector(`input[name='numberMode'][value='${settings.numberMode || "range"}']`).checked = true;
   els.startNumberInput.value = String(settings.startNumber || 1);
@@ -95,6 +99,7 @@ function currentSettings() {
     startNumber: Number(els.startNumberInput.value || 1),
     endNumber: Number(els.endNumberInput.value || 1),
     manualNumbers: els.manualNumbersInput.value.trim(),
+    zoomFactor: Number(els.zoomFactorSelect.value || 0.8),
     typingSpeed: Number(els.typingSpeedInput.value || 1),
     humanLikeTyping: Boolean(els.humanLikeTypingInput.checked)
   };

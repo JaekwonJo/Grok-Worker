@@ -1,6 +1,11 @@
 (function () {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  void chrome.runtime.sendMessage({
+    type: "grok-extension:set-zoom",
+    payload: { zoomFactor: 0.8 }
+  }).catch(() => {});
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== "grok-extension:run-item") {
       return false;
@@ -20,6 +25,10 @@
     }
 
     await waitForImagineReady();
+    await chrome.runtime.sendMessage({
+      type: "grok-extension:set-zoom",
+      payload: { zoomFactor: Number(settings.zoomFactor || 0.8) }
+    }).catch(() => {});
     await focusComposer();
     await clearComposer();
 

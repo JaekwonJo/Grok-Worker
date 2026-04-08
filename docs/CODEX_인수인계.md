@@ -33,6 +33,7 @@
 - IndexedDB 기반 레퍼런스 이미지 저장
 - 이름 저장 / 삭제
 - 연속 / 개별 번호 실행 선택
+- 현재 Grok 탭 줌 80% 기본 적용 (`chrome.tabs.setZoom`)
 - 현재 Grok 탭을 대상으로 background -> content 실행 메시지 전달
 - 이미지 첨부 / 프롬프트 입력 / 화살표 제출 / 다운로드 버튼 탐색 1차 연결
 - 다운로드 파일명은 `chrome.downloads.onDeterminingFilename`으로 제안
