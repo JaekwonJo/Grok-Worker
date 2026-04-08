@@ -5,8 +5,9 @@ playwright_cache/
 logs/
 downloads/
 runtime/
+prompts/
+grok_worker_config.json
 config.local.json
 *.pyc
 *.pyo
 *.pyd
-

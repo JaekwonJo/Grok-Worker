@@ -25,9 +25,5 @@ if not defined PY_CMD (
 )
 
 echo [INFO] Using command: %PY_CMD%
-%PY_CMD% main.py
-
-echo.
-echo [INFO] Grok Worker has stopped.
-echo.
-pause
+start "" wscript.exe "%~dp0Grok_Start.vbs"
+exit /b 0

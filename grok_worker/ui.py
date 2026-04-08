@@ -22,8 +22,8 @@ class GrokWorkerApp:
 
         self.root = tk.Tk()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok_워커1')}")
-        self.root.geometry("1440x980")
-        self.root.minsize(1220, 860)
+        self.root.geometry("1140x780")
+        self.root.minsize(980, 700)
         self.root.configure(bg="#14161b")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -59,22 +59,22 @@ class GrokWorkerApp:
 
         top_left = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
         top_left.pack(side="left", fill="both", expand=True)
-        tk.Label(top_left, text="Grok 이미지 워커", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 18, "bold")).pack(anchor="w", padx=14, pady=(12, 2))
+        tk.Label(top_left, text="Grok 이미지 워커", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 16, "bold")).pack(anchor="w", padx=12, pady=(10, 2))
         tk.Label(top_left, textvariable=self.worker_name_var, bg="#1d2432", fg="#a9bdd8", font=("Malgun Gothic", 10)).pack(anchor="w", padx=14, pady=(0, 12))
 
-        top_mid = tk.Frame(top, bg="#202b3e", width=430, highlightbackground="#4c6b9a", highlightthickness=1)
+        top_mid = tk.Frame(top, bg="#202b3e", width=360, highlightbackground="#4c6b9a", highlightthickness=1)
         top_mid.pack(side="left", padx=14, fill="y")
-        tk.Label(top_mid, text="진행 상황", bg="#202b3e", fg="#d8e4ff", font=("Malgun Gothic", 13, "bold")).pack(pady=(12, 4))
+        tk.Label(top_mid, text="진행 상황", bg="#202b3e", fg="#d8e4ff", font=("Malgun Gothic", 12, "bold")).pack(pady=(10, 4))
         tk.Label(top_mid, textvariable=self.project_summary_var, bg="#202b3e", fg="#c4d4ec", font=("Malgun Gothic", 10)).pack()
-        tk.Label(top_mid, textvariable=self.progress_var, bg="#202b3e", fg="#80c6ff", font=("Consolas", 17, "bold")).pack(pady=(6, 6))
-        self.progress_canvas = tk.Canvas(top_mid, width=360, height=18, bg="#152033", highlightthickness=1, highlightbackground="#314966")
-        self.progress_canvas.pack(padx=20, pady=(0, 12))
+        tk.Label(top_mid, textvariable=self.progress_var, bg="#202b3e", fg="#80c6ff", font=("Consolas", 15, "bold")).pack(pady=(6, 6))
+        self.progress_canvas = tk.Canvas(top_mid, width=300, height=16, bg="#152033", highlightthickness=1, highlightbackground="#314966")
+        self.progress_canvas.pack(padx=18, pady=(0, 10))
         self.progress_fill = self.progress_canvas.create_rectangle(0, 0, 0, 18, fill="#4ca7ff", outline="")
 
         top_right = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
         top_right.pack(side="left", fill="both", expand=True)
-        tk.Label(top_right, text="현재 상태", bg="#1d2432", fg="#d8e4ff", font=("Malgun Gothic", 12, "bold")).pack(anchor="e", padx=14, pady=(14, 4))
-        tk.Label(top_right, textvariable=self.status_var, bg="#1d2432", fg="#79e3a0", font=("Malgun Gothic", 16, "bold"), wraplength=330, justify="right").pack(anchor="e", padx=14, pady=(0, 14))
+        tk.Label(top_right, text="현재 상태", bg="#1d2432", fg="#d8e4ff", font=("Malgun Gothic", 11, "bold")).pack(anchor="e", padx=12, pady=(12, 4))
+        tk.Label(top_right, textvariable=self.status_var, bg="#1d2432", fg="#79e3a0", font=("Malgun Gothic", 13, "bold"), wraplength=230, justify="right").pack(anchor="e", padx=12, pady=(0, 12))
 
         body = tk.Frame(root, bg="#14161b")
         body.pack(fill="both", expand=True, padx=16, pady=(0, 12))
@@ -659,8 +659,8 @@ class GrokWorkerApp:
         done = sum(1 for item in self.queue_items if item.status == "success")
         percent = (done / total * 100.0) if total else 0.0
         self.progress_var.set(f"{done} / {total} ({percent:.1f}%)")
-        width = 360
-        self.progress_canvas.coords(self.progress_fill, 0, 0, width * (percent / 100.0), 18)
+        width = 300
+        self.progress_canvas.coords(self.progress_fill, 0, 0, width * (percent / 100.0), 16)
 
     def _update_queue_scroll(self) -> None:
         self.queue_canvas.configure(scrollregion=self.queue_canvas.bbox("all"))
@@ -715,4 +715,3 @@ class GrokWorkerApp:
 
     def run(self) -> None:
         self.root.mainloop()
-
