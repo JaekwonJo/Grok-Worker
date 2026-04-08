@@ -48,7 +48,7 @@ class BrowserManager:
                     context = p.chromium.launch_persistent_context(
                         str(profile_path),
                         headless=False,
-                        channel="chrome",
+                        channel="msedge",
                         viewport={"width": 1380, "height": 920},
                         accept_downloads=True,
                     )
@@ -73,4 +73,3 @@ class BrowserManager:
                     except Exception:
                         pass
                 self.log("브라우저 작업봇 창 종료")
-

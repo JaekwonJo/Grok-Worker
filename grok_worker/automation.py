@@ -222,7 +222,7 @@ class GrokAutomationEngine:
             "viewport": {"width": 1440, "height": 940},
         }
         try:
-            return playwright.chromium.launch_persistent_context(str(profile_dir), channel="chrome", **kwargs)
+            return playwright.chromium.launch_persistent_context(str(profile_dir), channel="msedge", **kwargs)
         except Exception:
             return playwright.chromium.launch_persistent_context(str(profile_dir), **kwargs)
 
@@ -579,4 +579,3 @@ class GrokAutomationEngine:
             if not candidate.exists():
                 return candidate
             idx += 1
-
