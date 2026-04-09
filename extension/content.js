@@ -19,7 +19,6 @@
   async function runItem(payload) {
     const item = payload?.item;
     const settings = payload?.settings || {};
-    const references = Array.isArray(payload?.references) ? payload.references : [];
     if (!item) {
       throw new Error("실행 항목이 없습니다.");
     }
@@ -31,9 +30,9 @@
     }).catch(() => {});
     await focusComposer();
     await clearComposer();
-
-    if (references.length) {
-      await attachReferenceImages(references);
+    if (Array.isArray(item.referenceNames) && item.referenceNames.length) {
+      await selectExistingReferenceImages(item.referenceNames);
+      await focusComposer();
     }
 
     await typePrompt(item.renderedPrompt, settings);
@@ -130,36 +129,24 @@
     await sleep(180);
   }
 
-  async function attachReferenceImages(references) {
+  async function selectExistingReferenceImages(referenceNames) {
+    const targets = [...new Set((referenceNames || []).map((name) => String(name || "").trim()).filter(Boolean))];
+    if (!targets.length) {
+      return;
+    }
     const plusButton = findPlusButton();
     if (!plusButton) {
       throw new Error("이미지 추가 + 버튼을 찾지 못했습니다.");
     }
     plusButton.click();
-    await sleep(400);
+    await sleep(500);
 
-    let fileInput = findFileInput();
-    if (!fileInput) {
-      await sleep(600);
-      fileInput = findFileInput();
+    const searchInput = await waitForAssetSearchInput();
+    for (const alias of targets) {
+      await selectSingleExistingReference(searchInput, alias);
     }
-    if (!fileInput) {
-      throw new Error("이미지 업로드 입력칸을 찾지 못했습니다.");
-    }
-
-    const files = await Promise.all(
-      references.map(async (ref) => {
-        const blob = await (await fetch(ref.dataUrl)).blob();
-        return new File([blob], ref.fileName || `${ref.alias}.png`, { type: ref.mimeType || blob.type || "image/png" });
-      })
-    );
-    const transfer = new DataTransfer();
-    for (const file of files) {
-      transfer.items.add(file);
-    }
-    fileInput.files = transfer.files;
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    await sleep(1800);
+    await closeReferencePanel();
+    await sleep(250);
   }
 
   function findPlusButton() {
@@ -199,12 +186,129 @@
     return best;
   }
 
-  function findFileInput() {
-    const inputs = [...document.querySelectorAll("input[type='file']")];
-    if (!inputs.length) {
-      return null;
+  async function waitForAssetSearchInput(timeoutMs = 6000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const input = findAssetSearchInput();
+      if (input) {
+        return input;
+      }
+      await sleep(250);
     }
-    return inputs[inputs.length - 1];
+    throw new Error("레퍼런스 검색창을 찾지 못했습니다.");
+  }
+
+  function findAssetSearchInput() {
+    const inputs = [...document.querySelectorAll("input, textarea, [contenteditable='true'], [role='textbox']")];
+    const vh = window.innerHeight || 900;
+    let best = null;
+    let bestScore = -1;
+    for (const node of inputs) {
+      if (!isVisible(node)) {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      const text = ((node.getAttribute?.("placeholder") || "") + " " + (node.getAttribute?.("aria-label") || "") + " " + (node.innerText || "")).trim();
+      let score = 0;
+      if (/검색|search|asset/i.test(text)) {
+        score += 1200;
+      }
+      if (rect.top < vh * 0.7) {
+        score += 120;
+      }
+      if (rect.width > 180) {
+        score += 60;
+      }
+      if (score > bestScore) {
+        best = node;
+        bestScore = score;
+      }
+    }
+    return bestScore >= 1000 ? best : null;
+  }
+
+  async function selectSingleExistingReference(searchInput, alias) {
+    const searchTerms = uniqueStrings([`@${alias}`, alias]);
+    let selected = false;
+    for (const term of searchTerms) {
+      await setInputValue(searchInput, term);
+      await sleep(500);
+      const card = findReferenceCard(alias);
+      if (card) {
+        card.click();
+        selected = true;
+        await sleep(350);
+        break;
+      }
+    }
+    await setInputValue(searchInput, "");
+    await sleep(180);
+    if (!selected) {
+      throw new Error(`미리 올린 레퍼런스 이미지 '${alias}'를 찾지 못했습니다.`);
+    }
+  }
+
+  function findReferenceCard(alias) {
+    const wanted = String(alias || "").trim().toLowerCase();
+    const withAt = `@${wanted}`;
+    const candidates = [...document.querySelectorAll("button, [role='button'], div")];
+    const vh = window.innerHeight || 900;
+    let best = null;
+    let bestScore = -1;
+    for (const node of candidates) {
+      if (!isVisible(node)) {
+        continue;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 40 || rect.height < 40 || rect.top > vh * 0.85) {
+        continue;
+      }
+      const text = (node.innerText || "").trim().toLowerCase();
+      if (!text || (!text.includes(wanted) && !text.includes(withAt))) {
+        continue;
+      }
+      let score = 0;
+      if (rect.width >= 80 && rect.height >= 60) {
+        score += 200;
+      }
+      if (rect.left < window.innerWidth * 0.7) {
+        score += 80;
+      }
+      if (text.includes(withAt)) {
+        score += 500;
+      } else if (text.includes(wanted)) {
+        score += 300;
+      }
+      if (score > bestScore) {
+        best = node;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  async function closeReferencePanel() {
+    const composer = findComposerInput();
+    if (composer) {
+      composer.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      composer.focus();
+      await sleep(200);
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
+  }
+
+  async function setInputValue(target, value) {
+    target.focus();
+    if ("value" in target) {
+      target.value = value;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+    target.textContent = value;
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
   }
 
   async function typePrompt(text, settings) {
@@ -364,5 +468,9 @@
     }
     const rect = node.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
+  }
+
+  function uniqueStrings(values) {
+    return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
   }
 })();

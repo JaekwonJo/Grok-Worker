@@ -1,5 +1,3 @@
-import { getReferenceByAlias } from "./lib/ref-db.js";
-
 const SETTINGS_KEY = "grokWorkerExtensionSettings";
 const RUN_STATE_KEY = "grokWorkerExtensionRunState";
 
@@ -147,16 +145,11 @@ async function startRun(payload) {
     });
 
     try {
-      const references = await collectReferences(item.referenceNames);
-      if (item.referenceNames.length && references.length !== new Set(item.referenceNames.map((name) => String(name).toLowerCase())).size) {
-        throw new Error("레퍼런스 이미지 라이브러리에서 일부 이름을 찾지 못했습니다.");
-      }
       const response = await chrome.tabs.sendMessage(tabId, {
         type: "grok-extension:run-item",
         payload: {
           item,
-          settings,
-          references
+          settings
         }
       });
       if (!response?.ok) {
@@ -218,18 +211,6 @@ async function resolveTargetTab(explicitTabId) {
     throw new Error("현재 창의 활성 탭이 grok.com 페이지가 아닙니다.");
   }
   return active.id;
-}
-
-async function collectReferences(referenceNames) {
-  const wanted = [...new Set((referenceNames || []).map((name) => String(name).trim()).filter(Boolean))];
-  const result = [];
-  for (const name of wanted) {
-    const found = await getReferenceByAlias(name);
-    if (found) {
-      result.push(found);
-    }
-  }
-  return result;
 }
 
 function defaultSettings() {

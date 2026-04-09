@@ -61,7 +61,7 @@ export function parsePromptBlocks(rawText, options = {}) {
       body,
       raw: chunk,
       referenceNames,
-      renderedPrompt: `${tag} Prompt : ${body.replace(REF_RE, "$1")}`,
+      renderedPrompt: `${tag} Prompt : ${body}`,
       cleanedBody: body.replace(REF_RE, "$1")
     });
   }
