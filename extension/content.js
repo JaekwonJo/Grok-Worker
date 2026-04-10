@@ -1,5 +1,13 @@
 (function () {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const logStep = async (message) => {
+    try {
+      await chrome.runtime.sendMessage({
+        type: "grok-extension:log",
+        payload: { message }
+      });
+    } catch (_) {}
+  };
 
   void chrome.runtime.sendMessage({
     type: "grok-extension:set-zoom",
@@ -23,30 +31,39 @@
       throw new Error("실행 항목이 없습니다.");
     }
 
+    await logStep(`${item.tag} 준비 시작`);
     await waitForImagineReady();
+    await logStep(`${item.tag} 입력창 확인 완료`);
     await chrome.runtime.sendMessage({
       type: "grok-extension:set-zoom",
       payload: { zoomFactor: Number(settings.zoomFactor || 0.8) }
     }).catch(() => {});
     await focusComposer();
     await clearComposer();
+    await logStep(`${item.tag} 입력창 초기화 완료`);
     if (Array.isArray(item.referenceNames) && item.referenceNames.length) {
+      await logStep(`${item.tag} 레퍼런스 선택 시작 | ${item.referenceNames.join(", ")}`);
       await selectExistingReferenceImages(item.referenceNames);
       await focusComposer();
+      await logStep(`${item.tag} 레퍼런스 선택 완료`);
     }
 
     await typePrompt(item.renderedPrompt, settings);
+    await logStep(`${item.tag} 프롬프트 입력 완료`);
     const submit = findSubmitButton();
     if (!submit) {
       throw new Error("전송 화살표 버튼을 찾지 못했습니다.");
     }
+    await logStep(`${item.tag} 전송 버튼 클릭`);
     submit.click();
 
     await waitForGenerationToSettle();
+    await logStep(`${item.tag} 결과 생성 감지`);
     const opened = await openLatestResult();
     if (!opened) {
       throw new Error("결과 이미지를 열지 못했습니다.");
     }
+    await logStep(`${item.tag} 결과 상세 열기 완료`);
     const fileName = `${item.tag}.png`;
     await chrome.runtime.sendMessage({
       type: "grok-extension:prepare-download-name",
@@ -56,8 +73,10 @@
       }
     });
     const downloadButton = await waitForDownloadButton();
+    await logStep(`${item.tag} 다운로드 버튼 클릭`);
     downloadButton.click();
     await sleep(1200);
+    await logStep(`${item.tag} 다운로드 요청 완료`);
     return { savedAs: fileName };
   }
 
@@ -66,6 +85,9 @@
     while (Date.now() - started < timeoutMs) {
       if (findComposerInput()) {
         return;
+      }
+      if (isLoginRequiredPage()) {
+        throw new Error("로그인이 필요하거나 로그인 상태를 확인하지 못했습니다.");
       }
       await sleep(400);
     }
@@ -235,6 +257,7 @@
       await sleep(500);
       const card = findReferenceCard(alias);
       if (card) {
+        await logStep(`레퍼런스 선택 | ${alias}`);
         card.click();
         selected = true;
         await sleep(350);
@@ -376,6 +399,9 @@
       if (/전송|send|submit|arrow/i.test(text) || /전송|send|submit|arrow/i.test(aria)) {
         score += 1000;
       }
+      if ((text === "" || aria === "") && rect.width <= 48 && rect.height <= 48) {
+        score += 260;
+      }
       if (score > bestScore) {
         best = node;
         bestScore = score;
@@ -472,5 +498,10 @@
 
   function uniqueStrings(values) {
     return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+  }
+
+  function isLoginRequiredPage() {
+    const text = document.body?.innerText || "";
+    return /로그인|가입하기|login|sign up|sign in/i.test(text) && !findComposerInput();
   }
 })();

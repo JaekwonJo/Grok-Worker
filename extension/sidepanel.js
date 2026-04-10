@@ -35,7 +35,8 @@ function bindElements() {
     "saveSettingsBtn",
     "summaryBar",
     "queueList",
-    "copyFailedBtn"
+    "copyFailedBtn",
+    "logList"
   ]) {
     els[id] = document.getElementById(id);
   }
@@ -228,7 +229,8 @@ async function refreshRunState() {
     successCount: 0,
     failedCount: 0,
     failedNumbers: [],
-    queue: []
+    queue: [],
+    logs: []
   });
 }
 
@@ -238,15 +240,28 @@ function renderRunState(state) {
   els.summaryBar.textContent = `활성 ${state.running ? 1 : 0}개 | 완료 ${state.successCount || 0} | 실패 ${state.failedCount || 0} | 대기 ${Math.max(0, (state.progressTotal || 0) - (state.progressCurrent || 0) - (state.running ? 1 : 0))}`;
   els.queueList.innerHTML = "";
   const queue = Array.isArray(state.queue) ? state.queue : [];
+  const logs = Array.isArray(state.logs) ? state.logs : [];
   if (!queue.length) {
     els.queueList.innerHTML = `<div class="queue-card pending"><strong>대기열 없음</strong><p>프롬프트를 넣고 시작을 누르면 여기 보입니다.</p></div>`;
+  } else {
+    for (const row of queue) {
+      const card = document.createElement("div");
+      card.className = `queue-card ${row.status || "pending"}`;
+      card.innerHTML = `<strong>${escapeHtml(row.tag || String(row.number))}</strong><p>${escapeHtml(row.message || statusLabel(row.status))}</p>`;
+      els.queueList.appendChild(card);
+    }
+  }
+
+  els.logList.innerHTML = "";
+  if (!logs.length) {
+    els.logList.innerHTML = `<div class="queue-card pending"><strong>로그 없음</strong><p>실행을 시작하면 단계별 로그가 여기에 보입니다.</p></div>`;
     return;
   }
-  for (const row of queue) {
-    const card = document.createElement("div");
-    card.className = `queue-card ${row.status || "pending"}`;
-    card.innerHTML = `<strong>${escapeHtml(row.tag || String(row.number))}</strong><p>${escapeHtml(row.message || statusLabel(row.status))}</p>`;
-    els.queueList.appendChild(card);
+  for (const row of logs.slice().reverse()) {
+    const item = document.createElement("div");
+    item.className = "log-row";
+    item.innerHTML = `<span class="time">${escapeHtml(row.time || "")}</span><span class="msg">${escapeHtml(row.message || "")}</span>`;
+    els.logList.appendChild(item);
   }
 }
 

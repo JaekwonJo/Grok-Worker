@@ -59,6 +59,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
+  if (message.type === "grok-extension:log") {
+    void appendRunLog(message.payload?.message || "");
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message.type === "grok-extension:get-run-state") {
     chrome.storage.local.get([RUN_STATE_KEY]).then((stored) => {
       sendResponse({ ok: true, state: stored[RUN_STATE_KEY] || emptyRunState() });
@@ -119,6 +124,7 @@ async function startRun(payload) {
     successCount: 0,
     failedCount: 0,
     failedNumbers: [],
+    logs: [],
     queue: items.map((item) => ({
       number: item.number,
       tag: item.tag,
@@ -127,6 +133,7 @@ async function startRun(payload) {
     }))
   };
   await setRunState(initialState);
+  await appendRunLog(`실행 시작 | ${items.length}개 | 저장 폴더=${settings.saveSubfolder || "Grok"}`);
 
   for (let index = 0; index < items.length; index += 1) {
     if (!currentSession || currentSession.stopRequested) {
@@ -145,6 +152,7 @@ async function startRun(payload) {
     });
 
     try {
+      await appendRunLog(`${item.tag} 실행 요청`);
       const response = await chrome.tabs.sendMessage(tabId, {
         type: "grok-extension:run-item",
         payload: {
@@ -165,6 +173,7 @@ async function startRun(payload) {
         }
         return state;
       });
+      await appendRunLog(`${item.tag} 성공${response.result?.savedAs ? ` | ${response.result.savedAs}` : ""}`);
     } catch (error) {
       await patchRunState((state) => {
         state.progressCurrent = index + 1;
@@ -177,6 +186,7 @@ async function startRun(payload) {
         }
         return state;
       });
+      await appendRunLog(`${item.tag} 실패 | ${error?.message || String(error)}`);
     }
   }
 
@@ -185,6 +195,7 @@ async function startRun(payload) {
     state.currentTag = "";
     return state;
   });
+  await appendRunLog("실행 종료");
   currentSession = null;
   return { ok: true };
 }
@@ -194,6 +205,7 @@ async function stopRun() {
     currentSession.stopRequested = true;
     await restoreZoomForTab(currentSession.tabId);
   }
+  await appendRunLog("사용자 중지 요청");
   await patchRunState((state) => {
     state.running = false;
     state.currentTag = "";
@@ -203,12 +215,16 @@ async function stopRun() {
 
 async function resolveTargetTab(explicitTabId) {
   if (Number.isInteger(explicitTabId)) {
+    const tab = await chrome.tabs.get(explicitTabId);
+    if (!/^https:\/\/grok\.com\/imagine/i.test(tab?.url || "")) {
+      throw new Error("현재 탭이 grok.com/imagine 페이지가 아닙니다.");
+    }
     return explicitTabId;
   }
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  const active = tabs.find((tab) => /^https:\/\/grok\.com\//.test(tab.url || ""));
+  const active = tabs.find((tab) => /^https:\/\/grok\.com\/imagine/i.test(tab.url || ""));
   if (!active?.id) {
-    throw new Error("현재 창의 활성 탭이 grok.com 페이지가 아닙니다.");
+    throw new Error("현재 창의 활성 탭이 grok.com/imagine 페이지가 아닙니다.");
   }
   return active.id;
 }
@@ -221,6 +237,7 @@ function defaultSettings() {
     startNumber: 1,
     endNumber: 1,
     manualNumbers: "",
+    zoomFactor: 0.8,
     typingSpeed: 1,
     humanLikeTyping: true
   };
@@ -235,7 +252,8 @@ function emptyRunState() {
     successCount: 0,
     failedCount: 0,
     failedNumbers: [],
-    queue: []
+    queue: [],
+    logs: []
   };
 }
 
@@ -305,6 +323,21 @@ async function patchRunState(mutator) {
   const state = structuredClone(stored[RUN_STATE_KEY] || emptyRunState());
   const next = mutator(state) || state;
   await setRunState(next);
+}
+
+async function appendRunLog(message) {
+  if (!message) {
+    return;
+  }
+  await patchRunState((state) => {
+    const logs = Array.isArray(state.logs) ? state.logs.slice(-79) : [];
+    logs.push({
+      time: new Date().toLocaleTimeString("ko-KR", { hour12: false }),
+      message: String(message)
+    });
+    state.logs = logs;
+    return state;
+  });
 }
 
 function sanitizeRelativePath(raw) {

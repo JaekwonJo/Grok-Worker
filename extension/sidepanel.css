@@ -271,3 +271,29 @@ textarea {
   margin: 0;
   color: var(--muted);
 }
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.log-row {
+  border: 1px solid #30435e;
+  border-radius: 10px;
+  background: #0f1621;
+  padding: 8px 10px;
+}
+
+.log-row .time {
+  color: var(--muted);
+  font-size: 11px;
+  margin-right: 8px;
+}
+
+.log-row .msg {
+  color: var(--text);
+  word-break: break-word;
+}
