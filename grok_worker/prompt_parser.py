@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Iterable
 
 
-REFERENCE_TOKEN_RE = re.compile(r"@((?:[Ss]\d+)|(?:[1-5]))\b")
+# 한글 조사(@S999가, @S001은 등)가 바로 붙는 경우도 참조 토큰으로 인식합니다.
+# ASCII 영숫자/언더스코어가 뒤에 이어질 때만 토큰 연장으로 보고 제외합니다.
+REFERENCE_TOKEN_RE = re.compile(r"@((?:[Ss]\d+)|(?:[1-5]))(?![A-Za-z0-9_])")
 
 
 @dataclass
@@ -58,20 +60,21 @@ def parse_prompt_blocks(
         rendered = normalized_chunk
 
         labeled_match = re.match(
-            rf"^\s*({re.escape(prefix)}\s*0*([1-9][0-9]*))\s*(?:PROMPT|프롬프트)\s*:\s*(.*)\s*$",
+            rf"^\s*({re.escape(prefix)}\s*0*([1-9][0-9]*))(?:\s*>\s*({re.escape(prefix)}\s*0*([1-9][0-9]*)))?\s*(?:PROMPT|프롬프트)\s*:\s*(.*)\s*$",
             first_line,
             re.IGNORECASE | re.DOTALL,
         )
         if labeled_match:
             number = int(labeled_match.group(2))
             tag = f"{prefix}{str(number).zfill(max(3, int(pad_width or 3)))}"
-            inline_body = str(labeled_match.group(3) or "").strip()
+            inline_body = str(labeled_match.group(5) or "").strip()
             body_parts = []
             if inline_body:
                 body_parts.append(inline_body)
             if rest_lines:
                 body_parts.append("\n".join(rest_lines).strip())
             body = _normalize_body("\n".join(part for part in body_parts if part.strip()))
+            rendered = f"{tag} Prompt : {body}"
         else:
             inline_match = re.match(r"^\s*0*([1-9][0-9]*)\s*:\s*(.*)\s*$", first_line, re.DOTALL)
             if inline_match:
