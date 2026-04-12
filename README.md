@@ -78,6 +78,9 @@ standalone `Grok Worker` 테스트 모드는 현재 Flow Classic Plus 이미지 
 - `4_병렬_워커_실행.bat`
 - `5_병렬_워커_2개_실행.bat`
 - `6_병렬_워커_3개_실행.bat`
+- `4_parallel_workers.bat`
+- `5_parallel_workers_2.bat`
+- `6_parallel_workers_3.bat`
 
 권장 사용 순서:
 
