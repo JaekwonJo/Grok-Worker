@@ -26,15 +26,36 @@ def find_python_command() -> str:
     return sys.executable
 
 
+def edge_window_position(index: int) -> tuple[int, int]:
+    positions = {
+        1: (20, 20),
+        2: (980, 20),
+        3: (20, 560),
+    }
+    return positions.get(index, (20 + (index - 1) * 420, 20))
+
+
+def worker_window_geometry(index: int) -> str:
+    geometries = {
+        1: "920x560+20+520",
+        2: "920x560+980+520",
+        3: "920x560+20+520",
+    }
+    return geometries.get(index, f"920x560+{20 + (index - 1) * 420}+520")
+
+
 def launch_edge(base_dir: Path, edge_exe: str, index: int) -> None:
     port = 9221 + index
     profile_dir = base_dir / "runtime" / f"edge_attach_profile_{index}"
     profile_dir.mkdir(parents=True, exist_ok=True)
+    pos_x, pos_y = edge_window_position(index)
     subprocess.Popen(
         [
             edge_exe,
             f"--remote-debugging-port={port}",
             f"--user-data-dir={profile_dir}",
+            f"--window-position={pos_x},{pos_y}",
+            "--window-size=920,520",
             "--new-window",
             "https://grok.com/imagine",
         ],
@@ -53,7 +74,9 @@ def launch_worker(base_dir: Path, python_cmd: str, index: int) -> None:
             "--attach-url",
             f"http://127.0.0.1:{port}",
             "--worker-name",
-            f"Grok_Worker{index}",
+            f"Grok Worker{index}",
+            "--geometry",
+            worker_window_geometry(index),
         ],
         cwd=str(base_dir),
     )

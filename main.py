@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--config", default="", help="설정 파일 이름")
     parser.add_argument("--attach-url", default="", help="기존 Edge 연결 주소")
     parser.add_argument("--worker-name", default="", help="창에 표시할 워커 이름")
+    parser.add_argument("--geometry", default="", help="워커 창 위치/크기")
     args = parser.parse_args()
     config_name = str(args.config or "").strip() or _default_config_name(str(args.instance or "").strip())
     try:
@@ -35,6 +36,7 @@ def main() -> None:
             instance_key=str(args.instance or "").strip(),
             forced_attach_url=str(args.attach_url or "").strip() or None,
             forced_worker_name=str(args.worker_name or "").strip() or None,
+            forced_geometry=str(args.geometry or "").strip() or None,
         )
         app.run()
     except Exception:

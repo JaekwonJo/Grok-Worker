@@ -14,7 +14,7 @@ DOWNLOADS_DIR = "downloads"
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "worker_name": "Grok_워커1",
+    "worker_name": "Grok Worker1",
     "project_profiles": [
         {
             "name": "기본 프로젝트",

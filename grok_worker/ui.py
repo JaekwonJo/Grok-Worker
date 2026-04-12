@@ -25,12 +25,14 @@ class GrokWorkerApp:
         instance_key: str = "",
         forced_attach_url: str | None = None,
         forced_worker_name: str | None = None,
+        forced_geometry: str | None = None,
     ):
         self.base_dir = Path(base_dir)
         self.config_name = str(config_name or CONFIG_FILE).strip() or CONFIG_FILE
         self.instance_key = str(instance_key or "").strip()
         self.forced_attach_url = str(forced_attach_url or "").strip() or None
         self.forced_worker_name = str(forced_worker_name or "").strip() or None
+        self.forced_geometry = str(forced_geometry or "").strip() or None
         self.cfg = load_config(self.base_dir, config_name=self.config_name)
         if self.forced_attach_url:
             self.cfg["browser_attach_url"] = self.forced_attach_url
@@ -48,8 +50,8 @@ class GrokWorkerApp:
         self.settings_collapsed = False
 
         self.root = tk.Tk()
-        self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok_워커1')}")
-        self.root.geometry(str(self.cfg.get("window_geometry") or "920x560"))
+        self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
+        self.root.geometry(self.forced_geometry or str(self.cfg.get("window_geometry") or "920x560"))
         self.root.minsize(820, 520)
         self.root.configure(bg="#14161b")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -90,7 +92,7 @@ class GrokWorkerApp:
 
         top_left = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
         top_left.pack(side="left", fill="both", expand=True)
-        tk.Label(top_left, text="Grok 이미지 워커", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 13, "bold")).pack(anchor="w", padx=10, pady=(6, 1))
+        tk.Label(top_left, text="Grok Worker", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 13, "bold")).pack(anchor="w", padx=10, pady=(6, 1))
         tk.Label(top_left, textvariable=self.worker_name_var, bg="#1d2432", fg="#a9bdd8", font=("Malgun Gothic", 9)).pack(anchor="w", padx=10, pady=(0, 6))
 
         top_mid = tk.Frame(top, bg="#202b3e", width=250, highlightbackground="#4c6b9a", highlightthickness=1)
@@ -335,7 +337,7 @@ class GrokWorkerApp:
         )
 
     def _load_vars_from_config(self) -> None:
-        self.worker_name_var.set(str(self.forced_worker_name or self.cfg.get("worker_name") or "Grok_워커1"))
+        self.worker_name_var.set(str(self.forced_worker_name or self.cfg.get("worker_name") or "Grok Worker1"))
         slots = self.cfg.get("prompt_slots") or []
         slot_index = max(0, min(int(self.cfg.get("prompt_slot_index", 0) or 0), len(slots) - 1))
         self.prompt_slot_var.set(str((slots[slot_index] or {}).get("name") or ""))
@@ -354,7 +356,7 @@ class GrokWorkerApp:
 
     def _write_vars_to_config(self) -> None:
         slots = self.cfg.get("prompt_slots") or []
-        self.cfg["worker_name"] = self.worker_name_var.get().strip() or "Grok_워커1"
+        self.cfg["worker_name"] = self.worker_name_var.get().strip() or "Grok Worker1"
         selected_dir = self.download_dir_var.get().strip()
         self.cfg["download_output_dir"] = selected_dir
         self.cfg["reference_image_dir"] = selected_dir
@@ -437,7 +439,7 @@ class GrokWorkerApp:
             )
         self._refresh_queue_summary()
         self._refresh_progress_display()
-        self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok_워커1')}")
+        self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
 
     def _refresh_prompt_menu(self) -> None:
         menu = self.prompt_menu["menu"]
