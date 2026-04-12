@@ -39,8 +39,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "reference_image_dir": "",
     "download_output_dir": "",
     "browser_profile_dir": f"{RUNTIME_DIR}/browser_profile_1",
+    "browser_launch_mode": "edge_attach",
+    "browser_attach_url": "http://127.0.0.1:9222",
     "typing_speed": 1.0,
     "humanize_typing": True,
+    "generate_wait_seconds": 5.0,
+    "next_prompt_wait_seconds": 2.0,
+    "break_every_count": 0,
+    "break_minutes": 0.0,
+    "window_geometry": "920x560",
+    "settings_collapsed": False,
     "grok_site_url": "https://grok.com/imagine",
 }
 
@@ -62,8 +70,8 @@ def ensure_app_dirs(base_dir: Path) -> None:
     (base_dir / DOWNLOADS_DIR).mkdir(parents=True, exist_ok=True)
 
 
-def config_path(base_dir: Path) -> Path:
-    return base_dir / CONFIG_FILE
+def config_path(base_dir: Path, config_name: str = CONFIG_FILE) -> Path:
+    return base_dir / (str(config_name or CONFIG_FILE).strip() or CONFIG_FILE)
 
 
 def _default_prompt_file_path(base_dir: Path) -> Path:
@@ -89,14 +97,14 @@ def _ensure_prompt_slots(base_dir: Path, cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def load_config(base_dir: Path) -> dict[str, Any]:
+def load_config(base_dir: Path, config_name: str = CONFIG_FILE) -> dict[str, Any]:
     ensure_app_dirs(base_dir)
-    path = config_path(base_dir)
+    path = config_path(base_dir, config_name)
     if not path.exists():
         cfg = deepcopy(DEFAULT_CONFIG)
         _default_prompt_file_path(base_dir).write_text("", encoding="utf-8")
         cfg["download_output_dir"] = str((base_dir / DOWNLOADS_DIR).resolve())
-        save_config(base_dir, cfg)
+        save_config(base_dir, cfg, config_name)
         return cfg
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -109,10 +117,10 @@ def load_config(base_dir: Path) -> dict[str, Any]:
     return cfg
 
 
-def save_config(base_dir: Path, cfg: dict[str, Any]) -> Path:
+def save_config(base_dir: Path, cfg: dict[str, Any], config_name: str = CONFIG_FILE) -> Path:
     ensure_app_dirs(base_dir)
     cfg = _ensure_prompt_slots(base_dir, deepcopy(cfg))
-    path = config_path(base_dir)
+    path = config_path(base_dir, config_name)
     path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -128,4 +136,3 @@ def next_prompt_slot_file(base_dir: Path, existing_slots: list[dict[str, Any]]) 
         if rel not in used and not (base_dir / rel).exists():
             return rel
         idx += 1
-

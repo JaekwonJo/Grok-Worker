@@ -1,123 +1,165 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 
 from .automation import GrokAutomationEngine
 from .browser import BrowserManager
-from .config import DEFAULT_CONFIG, next_prompt_slot_file, save_config, load_config
+from .config import CONFIG_FILE, DEFAULT_CONFIG, LOGS_DIR, next_prompt_slot_file, save_config, load_config
 from .prompt_parser import compress_numbers, summarize_prompt_file
 from .queue_state import QueueItem
 
 
 class GrokWorkerApp:
-    def __init__(self, base_dir: Path):
+    def __init__(
+        self,
+        base_dir: Path,
+        *,
+        config_name: str = CONFIG_FILE,
+        instance_key: str = "",
+        forced_attach_url: str | None = None,
+        forced_worker_name: str | None = None,
+    ):
         self.base_dir = Path(base_dir)
-        self.cfg = load_config(self.base_dir)
+        self.config_name = str(config_name or CONFIG_FILE).strip() or CONFIG_FILE
+        self.instance_key = str(instance_key or "").strip()
+        self.forced_attach_url = str(forced_attach_url or "").strip() or None
+        self.forced_worker_name = str(forced_worker_name or "").strip() or None
+        self.cfg = load_config(self.base_dir, config_name=self.config_name)
+        if self.forced_attach_url:
+            self.cfg["browser_attach_url"] = self.forced_attach_url
+        if self.forced_worker_name:
+            self.cfg["worker_name"] = self.forced_worker_name
+        self._suspend_auto_save = True
         self.browser = BrowserManager(self.log)
         self.queue_items: list[QueueItem] = []
         self.log_lines: list[str] = []
+        self.run_log_path: Path | None = None
+        self.run_log_fp = None
         self.run_thread: threading.Thread | None = None
         self.stop_event = threading.Event()
         self.pause_event = threading.Event()
+        self.settings_collapsed = False
 
         self.root = tk.Tk()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok_워커1')}")
-        self.root.geometry("980x690")
-        self.root.minsize(820, 600)
+        self.root.geometry(str(self.cfg.get("window_geometry") or "920x560"))
+        self.root.minsize(820, 520)
         self.root.configure(bg="#14161b")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._build_vars()
         self._build_ui()
         self._load_vars_from_config()
+        self._apply_settings_visibility()
+        self._suspend_auto_save = False
         self.refresh_all()
 
     def _build_vars(self) -> None:
         self.worker_name_var = tk.StringVar()
         self.prompt_slot_var = tk.StringVar()
-        self.reference_image_dir_var = tk.StringVar()
         self.download_dir_var = tk.StringVar()
-        self.browser_profile_var = tk.StringVar()
         self.number_mode_var = tk.StringVar()
         self.start_number_var = tk.StringVar()
         self.end_number_var = tk.StringVar()
         self.manual_numbers_var = tk.StringVar()
         self.typing_speed_var = tk.DoubleVar()
         self.humanize_typing_var = tk.BooleanVar()
+        self.generate_wait_var = tk.StringVar()
+        self.next_prompt_wait_var = tk.StringVar()
+        self.break_every_var = tk.StringVar()
+        self.break_minutes_var = tk.StringVar()
         self.status_var = tk.StringVar(value="준비 완료")
         self.progress_var = tk.StringVar(value="0 / 0 (0.0%)")
         self.project_summary_var = tk.StringVar(value="사이트: grok.com/imagine")
         self.queue_summary_var = tk.StringVar(value="활성 0개 | 완료 0 | 실패 0 | 대기 0")
         self.prompt_file_summary_var = tk.StringVar(value="")
+        self.attach_url_var = tk.StringVar(value="")
 
     def _build_ui(self) -> None:
         root = self.root
 
         top = tk.Frame(root, bg="#14161b")
-        top.pack(fill="x", padx=12, pady=(12, 8))
+        top.pack(fill="x", padx=10, pady=(10, 6))
 
         top_left = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
         top_left.pack(side="left", fill="both", expand=True)
-        tk.Label(top_left, text="Grok 이미지 워커", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 14, "bold")).pack(anchor="w", padx=10, pady=(8, 2))
-        tk.Label(top_left, textvariable=self.worker_name_var, bg="#1d2432", fg="#a9bdd8", font=("Malgun Gothic", 9)).pack(anchor="w", padx=12, pady=(0, 8))
+        tk.Label(top_left, text="Grok 이미지 워커", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 13, "bold")).pack(anchor="w", padx=10, pady=(6, 1))
+        tk.Label(top_left, textvariable=self.worker_name_var, bg="#1d2432", fg="#a9bdd8", font=("Malgun Gothic", 9)).pack(anchor="w", padx=10, pady=(0, 6))
 
-        top_mid = tk.Frame(top, bg="#202b3e", width=290, highlightbackground="#4c6b9a", highlightthickness=1)
-        top_mid.pack(side="left", padx=10, fill="y")
-        tk.Label(top_mid, text="진행 상황", bg="#202b3e", fg="#d8e4ff", font=("Malgun Gothic", 11, "bold")).pack(pady=(8, 2))
-        tk.Label(top_mid, textvariable=self.project_summary_var, bg="#202b3e", fg="#c4d4ec", font=("Malgun Gothic", 9)).pack()
-        tk.Label(top_mid, textvariable=self.progress_var, bg="#202b3e", fg="#80c6ff", font=("Consolas", 13, "bold")).pack(pady=(4, 4))
-        self.progress_canvas = tk.Canvas(top_mid, width=300, height=16, bg="#152033", highlightthickness=1, highlightbackground="#314966")
-        self.progress_canvas.pack(padx=12, pady=(0, 8))
+        top_mid = tk.Frame(top, bg="#202b3e", width=250, highlightbackground="#4c6b9a", highlightthickness=1)
+        top_mid.pack(side="left", padx=8, fill="y")
+        tk.Label(top_mid, text="진행 상황", bg="#202b3e", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(pady=(6, 1))
+        tk.Label(top_mid, textvariable=self.project_summary_var, bg="#202b3e", fg="#c4d4ec", font=("Malgun Gothic", 8)).pack()
+        tk.Label(top_mid, textvariable=self.progress_var, bg="#202b3e", fg="#80c6ff", font=("Consolas", 12, "bold")).pack(pady=(2, 3))
+        self.progress_canvas = tk.Canvas(top_mid, width=230, height=14, bg="#152033", highlightthickness=1, highlightbackground="#314966")
+        self.progress_canvas.pack(padx=10, pady=(0, 6))
         self.progress_fill = self.progress_canvas.create_rectangle(0, 0, 0, 18, fill="#4ca7ff", outline="")
 
         top_right = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
         top_right.pack(side="left", fill="both", expand=True)
-        tk.Label(top_right, text="현재 상태", bg="#1d2432", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="e", padx=10, pady=(8, 2))
-        tk.Label(top_right, textvariable=self.status_var, bg="#1d2432", fg="#79e3a0", font=("Malgun Gothic", 11, "bold"), wraplength=180, justify="right").pack(anchor="e", padx=10, pady=(0, 8))
+        tk.Label(top_right, text="현재 상태", bg="#1d2432", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="e", padx=10, pady=(6, 1))
+        tk.Label(top_right, textvariable=self.status_var, bg="#1d2432", fg="#79e3a0", font=("Malgun Gothic", 10, "bold"), wraplength=180, justify="right").pack(anchor="e", padx=10, pady=(0, 6))
+
+        action_row = tk.Frame(root, bg="#14161b")
+        action_row.pack(fill="x", padx=10, pady=(0, 6))
+        action_left = tk.Frame(action_row, bg="#14161b")
+        action_left.pack(side="left")
+        action_right = tk.Frame(action_row, bg="#14161b")
+        action_right.pack(side="right")
+
+        self._action_button(action_left, "완전정지", self.stop_all, "#233042", small=True).pack(side="left", padx=(0, 6))
+        self._action_button(action_left, "일시정지", self.pause_run, "#233042", small=True).pack(side="left", padx=6)
+        self._action_button(action_left, "재개", self.resume_run, "#233042", small=True).pack(side="left", padx=6)
+        self.settings_toggle_btn = self._action_button(action_left, "⚙ 설정 접기", self.toggle_settings_panel, "#233042", small=True)
+        self.settings_toggle_btn.pack(side="left", padx=6)
+        self._action_button(action_right, "작업봇 창 열기", self.open_browser_window, "#31527d").pack(side="left", padx=(0, 6))
+        self._action_button(action_right, "▶ 시작", self.start_run, "#2f8a68").pack(side="left")
 
         body = tk.Frame(root, bg="#14161b")
-        body.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         settings = tk.Frame(body, bg="#1a2f4f", highlightbackground="#5b84b8", highlightthickness=1)
+        self.settings_frame = settings
+
         settings.pack(fill="x")
-        settings.grid_columnconfigure(0, weight=5)
+        settings.grid_columnconfigure(0, weight=6)
         settings.grid_columnconfigure(1, weight=4)
 
         left = tk.Frame(settings, bg="#1a2f4f")
-        left.grid(row=0, column=0, sticky="nsew", padx=(12, 6), pady=10)
+        left.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=8)
         right = tk.Frame(settings, bg="#1a2f4f")
-        right.grid(row=0, column=1, sticky="nsew", padx=(6, 12), pady=10)
+        right.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=8)
 
         self._build_basic_settings(left)
         self._build_number_settings(right)
 
-        action_row = tk.Frame(body, bg="#14161b")
-        action_row.pack(fill="x", pady=(8, 8))
+        lower = tk.Frame(body, bg="#14161b")
+        self.lower_frame = lower
+        lower.pack(fill="both", expand=True, pady=(8, 0))
+        lower.grid_columnconfigure(0, weight=1)
+        lower.grid_columnconfigure(1, weight=1)
+        lower.grid_rowconfigure(0, weight=1)
 
-        self._action_button(action_row, "완전정지", self.stop_all, "#233042").pack(side="left", padx=(0, 8))
-        self._action_button(action_row, "일시정지", self.pause_run, "#233042").pack(side="left", padx=8)
-        self._action_button(action_row, "재개", self.resume_run, "#233042").pack(side="left", padx=8)
-        self._action_button(action_row, "💾 저장", self.manual_save, "#31527d").pack(side="left", padx=8)
-        self._action_button(action_row, "작업봇 창 열기", self.open_browser_window, "#31527d").pack(side="right", padx=(8, 0))
-        self._action_button(action_row, "▶ 시작", self.start_run, "#2f8a68").pack(side="right", padx=(8, 0))
-
-        queue_wrap = tk.Frame(body, bg="#17283f", highlightbackground="#5b84b8", highlightthickness=1)
-        queue_wrap.pack(fill="both", expand=True)
+        queue_wrap = tk.Frame(lower, bg="#17283f", highlightbackground="#5b84b8", highlightthickness=1)
+        self.queue_wrap = queue_wrap
+        queue_wrap.grid(row=0, column=0, sticky="nsew")
 
         queue_header = tk.Frame(queue_wrap, bg="#17283f")
-        queue_header.pack(fill="x", padx=10, pady=(10, 6))
-        tk.Label(queue_header, text="Grok 생성+다운로드 대기열", bg="#17283f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(side="left")
+        queue_header.pack(fill="x", padx=8, pady=(8, 4))
+        tk.Label(queue_header, text="대기열", bg="#17283f", fg="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="left")
         self._action_button(queue_header, "실패 번호 복붙", self.copy_failed_numbers, "#31527d", small=True).pack(side="right", padx=(8, 0))
         self._action_button(queue_header, "지우기", self.clear_queue, "#31527d", small=True).pack(side="right")
-        tk.Label(queue_header, textvariable=self.queue_summary_var, bg="#17283f", fg="#c4d4ec", font=("Malgun Gothic", 9)).pack(side="right", padx=(12, 16))
+        tk.Label(queue_header, textvariable=self.queue_summary_var, bg="#17283f", fg="#c4d4ec", font=("Malgun Gothic", 8)).pack(side="right", padx=(10, 12))
 
         queue_body = tk.Frame(queue_wrap, bg="#17283f")
-        queue_body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        queue_body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.queue_canvas = tk.Canvas(queue_body, bg="#17283f", highlightthickness=0)
         self.queue_scroll = tk.Scrollbar(queue_body, orient="vertical", command=self.queue_canvas.yview)
         self.queue_canvas.configure(yscrollcommand=self.queue_scroll.set)
@@ -129,46 +171,46 @@ class GrokWorkerApp:
         self.queue_canvas.bind("<Configure>", self._on_queue_canvas_resize)
         self.queue_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
-        log_frame = tk.Frame(body, bg="#14161b")
-        log_frame.pack(fill="both", pady=(10, 0))
-        tk.Label(log_frame, text="로그", bg="#14161b", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="w")
+        log_frame = tk.Frame(lower, bg="#14161b", highlightbackground="#5b84b8", highlightthickness=1)
+        self.log_frame = log_frame
+        log_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        tk.Label(log_frame, text="로그", bg="#14161b", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
         self.log_text = tk.Text(log_frame, height=6, bg="#101723", fg="#d7e5ff", insertbackground="#ffffff", relief="solid", borderwidth=1)
-        self.log_text.pack(fill="both", expand=False, pady=(6, 0))
+        self.log_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.log_text.configure(state="disabled")
 
     def _build_basic_settings(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="기본 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(2, 8))
-        header_actions = tk.Frame(parent, bg="#1a2f4f")
-        header_actions.pack(fill="x", padx=4, pady=(0, 8))
-        self._action_button(header_actions, "새로고침", self.refresh_all, "#31527d", small=True).pack(side="right", padx=(8, 0))
-        self._action_button(header_actions, "새 프로필", self.create_new_profile, "#31527d", small=True).pack(side="right", padx=(8, 0))
-        self._action_button(header_actions, "이름 변경", self.rename_worker, "#31527d", small=True).pack(side="right")
+        tk.Label(parent, text="기본 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
 
         self._labeled_combo(parent, "프롬프트 파일", self.prompt_slot_var, self.prompt_slot_changed)
         prompt_btns = tk.Frame(parent, bg="#1a2f4f")
         prompt_btns.pack(fill="x", padx=4, pady=(0, 4))
-        self._action_button(prompt_btns, "파일 열기", self.open_prompt_file, "#31527d", small=True).pack(side="left")
-        self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, "#31527d", small=True).pack(side="left", padx=8)
-        self._action_button(prompt_btns, "삭제", self.delete_prompt_file, "#31527d", small=True).pack(side="left", padx=8)
-        self._action_button(prompt_btns, "추가", self.add_prompt_file, "#31527d", small=True).pack(side="left", padx=8)
+        for col in range(4):
+            prompt_btns.grid_columnconfigure(col, weight=1)
+        self._action_button(prompt_btns, "파일 열기", self.open_prompt_file, "#31527d", small=True, width=8).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, "#31527d", small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
+        self._action_button(prompt_btns, "삭제", self.delete_prompt_file, "#31527d", small=True, width=8).grid(row=0, column=2, sticky="ew", padx=6)
+        self._action_button(prompt_btns, "추가", self.add_prompt_file, "#31527d", small=True, width=6).grid(row=0, column=3, sticky="ew", padx=(6, 0))
         tk.Label(parent, textvariable=self.prompt_file_summary_var, bg="#1a2f4f", fg="#c8d7eb", font=("Malgun Gothic", 9)).pack(anchor="w", padx=4, pady=(0, 8))
 
-        self._path_row(parent, "레퍼런스 이미지 폴더", self.reference_image_dir_var, self.choose_reference_dir)
         self._path_row(parent, "저장 폴더", self.download_dir_var, self.choose_download_dir)
+        attach_note = tk.Frame(parent, bg="#1a2f4f")
+        attach_note.pack(fill="x", padx=4, pady=(0, 8))
+        tk.Label(attach_note, text="브라우저 연결", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         tk.Label(
-            parent,
-            text="브라우저 프로필은 자동으로 유지됩니다. 새 로그인 세션이 필요할 때만 `새 프로필`을 누르면 됩니다.",
-            bg="#1a2f4f",
-            fg="#bcd0e9",
-            justify="left",
-            font=("Malgun Gothic", 9),
-            wraplength=460,
-        ).pack(anchor="w", padx=4, pady=(2, 4))
+            attach_note,
+            textvariable=self.attach_url_var,
+            bg="#20304a",
+            fg="#8fd0ff",
+            font=("Consolas", 10, "bold"),
+            padx=10,
+            pady=5,
+        ).pack(anchor="w", pady=(6, 0))
 
     def _build_number_settings(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="번호 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(2, 8))
+        tk.Label(parent, text="번호 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
         mode_row = tk.Frame(parent, bg="#1a2f4f")
-        mode_row.pack(fill="x", padx=4, pady=(0, 8))
+        mode_row.pack(fill="x", padx=4, pady=(0, 6))
         for text, value in (("연속", "range"), ("개별", "manual")):
             tk.Radiobutton(
                 mode_row,
@@ -185,22 +227,25 @@ class GrokWorkerApp:
             ).pack(side="left", padx=(0, 18))
 
         range_row = tk.Frame(parent, bg="#1a2f4f")
-        range_row.pack(fill="x", padx=4, pady=(0, 8))
+        range_row.pack(fill="x", padx=4, pady=(0, 6))
         tk.Label(range_row, text="연속 범위", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.start_entry = tk.Entry(range_row, textvariable=self.start_number_var, width=8, font=("Consolas", 12))
         self.start_entry.pack(side="left", padx=(12, 6))
+        self._bind_entry_autosave(self.start_entry, "번호 범위 변경")
         tk.Label(range_row, text="~", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.end_entry = tk.Entry(range_row, textvariable=self.end_number_var, width=8, font=("Consolas", 12))
         self.end_entry.pack(side="left", padx=(6, 0))
+        self._bind_entry_autosave(self.end_entry, "번호 범위 변경")
 
         manual_row = tk.Frame(parent, bg="#1a2f4f")
-        manual_row.pack(fill="x", padx=4, pady=(0, 8))
+        manual_row.pack(fill="x", padx=4, pady=(0, 6))
         tk.Label(manual_row, text="개별 번호", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         self.manual_entry = tk.Entry(manual_row, textvariable=self.manual_numbers_var, font=("Consolas", 12))
         self.manual_entry.pack(fill="x", pady=(6, 0))
+        self._bind_entry_autosave(self.manual_entry, "개별 번호 변경")
 
         speed_row = tk.Frame(parent, bg="#1a2f4f")
-        speed_row.pack(fill="x", padx=4, pady=(0, 8))
+        speed_row.pack(fill="x", padx=4, pady=(0, 6))
         tk.Label(speed_row, text="타이핑 속도", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         self.speed_scale = tk.Scale(
             speed_row,
@@ -217,24 +262,35 @@ class GrokWorkerApp:
         )
         self.speed_scale.pack(fill="x")
 
-        tk.Checkbutton(
-            parent,
-            text="인간처럼 입력하기",
-            variable=self.humanize_typing_var,
-            command=lambda: self.auto_save("입력 방식 변경"),
-            bg="#1a2f4f",
-            fg="#ffffff",
-            selectcolor="#20304a",
-            activebackground="#1a2f4f",
-            activeforeground="#ffffff",
-            font=("Malgun Gothic", 10),
-        ).pack(anchor="w", padx=14, pady=(0, 10))
+        humanize_row = tk.Frame(parent, bg="#1a2f4f")
+        humanize_row.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(humanize_row, text="인간처럼 입력", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(humanize_row, text="항상 ON", bg="#20304a", fg="#8df0bd", font=("Malgun Gothic", 10, "bold"), padx=10, pady=3).pack(side="left", padx=(10, 0))
 
-        hint = (
-            "프롬프트 파일은 `001 : 본문 |||` 형식으로 쓰면 됩니다.\n"
-            "실행할 때 실제 입력창에는 자동으로 `S001 Prompt : 본문` 형식으로 들어갑니다."
-        )
-        tk.Label(parent, text=hint, bg="#1a2f4f", fg="#bcd0e9", justify="left", font=("Malgun Gothic", 9)).pack(anchor="w", padx=4, pady=(0, 4))
+        wait_row_1 = tk.Frame(parent, bg="#1a2f4f")
+        wait_row_1.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(wait_row_1, text="생성 후 다운로드 대기(초)", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        self.generate_wait_entry = tk.Entry(wait_row_1, textvariable=self.generate_wait_var, width=8, font=("Consolas", 11))
+        self.generate_wait_entry.pack(side="left", padx=(12, 0))
+        self._bind_entry_autosave(self.generate_wait_entry, "생성 대기시간 변경")
+
+        wait_row_2 = tk.Frame(parent, bg="#1a2f4f")
+        wait_row_2.pack(fill="x", padx=4, pady=(0, 4))
+        tk.Label(wait_row_2, text="다운로드 후 다음 작업 대기(초)", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        self.next_prompt_wait_entry = tk.Entry(wait_row_2, textvariable=self.next_prompt_wait_var, width=8, font=("Consolas", 11))
+        self.next_prompt_wait_entry.pack(side="left", padx=(12, 0))
+        self._bind_entry_autosave(self.next_prompt_wait_entry, "다음 작업 대기시간 변경")
+
+        break_row = tk.Frame(parent, bg="#1a2f4f")
+        break_row.pack(fill="x", padx=4, pady=(6, 0))
+        tk.Label(break_row, text="몇 개마다 휴식", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        self.break_every_entry = tk.Entry(break_row, textvariable=self.break_every_var, width=6, font=("Consolas", 11))
+        self.break_every_entry.pack(side="left", padx=(10, 12))
+        self._bind_entry_autosave(self.break_every_entry, "휴식 간격 변경")
+        tk.Label(break_row, text="휴식 시간(분)", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        self.break_minutes_entry = tk.Entry(break_row, textvariable=self.break_minutes_var, width=6, font=("Consolas", 11))
+        self.break_minutes_entry.pack(side="left", padx=(10, 0))
+        self._bind_entry_autosave(self.break_minutes_entry, "휴식 시간 변경")
 
     def _labeled_combo(self, parent: tk.Frame, label: str, variable: tk.StringVar, callback) -> None:
         row = tk.Frame(parent, bg="#1a2f4f")
@@ -254,9 +310,14 @@ class GrokWorkerApp:
         input_row.pack(fill="x", pady=(6, 0))
         entry = tk.Entry(input_row, textvariable=variable, font=("Consolas", 10))
         entry.pack(side="left", fill="x", expand=True)
+        self._bind_entry_autosave(entry, f"{label} 변경")
         self._action_button(input_row, "선택", command, "#31527d", small=True).pack(side="left", padx=(8, 0))
 
-    def _action_button(self, parent, text, command, bg, small=False):
+    def _bind_entry_autosave(self, widget, reason: str) -> None:
+        widget.bind("<FocusOut>", lambda _e, r=reason: self.auto_save(r))
+        widget.bind("<Return>", lambda _e, r=reason: self.auto_save(r))
+
+    def _action_button(self, parent, text, command, bg, small=False, width=None):
         return tk.Button(
             parent,
             text=text,
@@ -269,36 +330,48 @@ class GrokWorkerApp:
             padx=14 if not small else 10,
             pady=8 if not small else 5,
             font=("Malgun Gothic", 10, "bold" if not small else "normal"),
+            width=width,
             cursor="hand2",
         )
 
     def _load_vars_from_config(self) -> None:
-        self.worker_name_var.set(str(self.cfg.get("worker_name") or "Grok_워커1"))
+        self.worker_name_var.set(str(self.forced_worker_name or self.cfg.get("worker_name") or "Grok_워커1"))
         slots = self.cfg.get("prompt_slots") or []
         slot_index = max(0, min(int(self.cfg.get("prompt_slot_index", 0) or 0), len(slots) - 1))
         self.prompt_slot_var.set(str((slots[slot_index] or {}).get("name") or ""))
-        self.reference_image_dir_var.set(str(self.cfg.get("reference_image_dir") or ""))
         self.download_dir_var.set(str(self.cfg.get("download_output_dir") or ""))
-        self.browser_profile_var.set(str(self.cfg.get("browser_profile_dir") or ""))
         self.number_mode_var.set(str(self.cfg.get("number_mode") or "range"))
         self.start_number_var.set(str(self.cfg.get("start_number", 1) or 1))
         self.end_number_var.set(str(self.cfg.get("end_number", 10) or 10))
         self.manual_numbers_var.set(str(self.cfg.get("manual_numbers") or ""))
         self.typing_speed_var.set(float(self.cfg.get("typing_speed", 1.0) or 1.0))
-        self.humanize_typing_var.set(bool(self.cfg.get("humanize_typing", True)))
+        self.humanize_typing_var.set(True)
+        self.generate_wait_var.set(str(self.cfg.get("generate_wait_seconds", 5.0) or 5.0))
+        self.next_prompt_wait_var.set(str(self.cfg.get("next_prompt_wait_seconds", 2.0) or 2.0))
+        self.break_every_var.set(str(self.cfg.get("break_every_count", 0) or 0))
+        self.break_minutes_var.set(str(self.cfg.get("break_minutes", 0.0) or 0.0))
+        self.settings_collapsed = bool(self.cfg.get("settings_collapsed", False))
 
     def _write_vars_to_config(self) -> None:
         slots = self.cfg.get("prompt_slots") or []
         self.cfg["worker_name"] = self.worker_name_var.get().strip() or "Grok_워커1"
-        self.cfg["reference_image_dir"] = self.reference_image_dir_var.get().strip()
-        self.cfg["download_output_dir"] = self.download_dir_var.get().strip()
-        self.cfg["browser_profile_dir"] = self.browser_profile_var.get().strip()
+        selected_dir = self.download_dir_var.get().strip()
+        self.cfg["download_output_dir"] = selected_dir
+        self.cfg["reference_image_dir"] = selected_dir
+        self.cfg["browser_launch_mode"] = "edge_attach"
+        self.cfg["browser_attach_url"] = self.forced_attach_url or str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222")
         self.cfg["number_mode"] = self.number_mode_var.get().strip() or "range"
         self.cfg["start_number"] = self._int_or_default(self.start_number_var.get(), 1)
         self.cfg["end_number"] = self._int_or_default(self.end_number_var.get(), self.cfg["start_number"])
         self.cfg["manual_numbers"] = self.manual_numbers_var.get().strip()
         self.cfg["typing_speed"] = round(float(self.typing_speed_var.get() or 1.0), 1)
-        self.cfg["humanize_typing"] = bool(self.humanize_typing_var.get())
+        self.cfg["humanize_typing"] = True
+        self.cfg["generate_wait_seconds"] = self._float_or_default(self.generate_wait_var.get(), 5.0)
+        self.cfg["next_prompt_wait_seconds"] = self._float_or_default(self.next_prompt_wait_var.get(), 2.0)
+        self.cfg["break_every_count"] = self._nonnegative_int_or_default(self.break_every_var.get(), 0)
+        self.cfg["break_minutes"] = self._float_or_default(self.break_minutes_var.get(), 0.0)
+        self.cfg["window_geometry"] = self.root.geometry()
+        self.cfg["settings_collapsed"] = bool(self.settings_collapsed)
 
         slot_name = self.prompt_slot_var.get().strip()
         for idx, slot in enumerate(slots):
@@ -307,26 +380,48 @@ class GrokWorkerApp:
                 break
 
     def auto_save(self, reason: str = "") -> None:
+        if self._suspend_auto_save:
+            return
         self._write_vars_to_config()
-        save_config(self.base_dir, self.cfg)
+        save_config(self.base_dir, self.cfg, self.config_name)
         if reason:
             self.log(f"자동 저장: {reason}")
         self.refresh_summary_only()
 
     def manual_save(self) -> None:
         self._write_vars_to_config()
-        path = save_config(self.base_dir, self.cfg)
+        path = save_config(self.base_dir, self.cfg, self.config_name)
         self.log(f"설정 저장: {path.name}")
         self.refresh_summary_only()
 
     def refresh_all(self) -> None:
         self._refresh_prompt_menu()
         self.on_number_mode_changed()
+        self._apply_settings_visibility()
         self.refresh_summary_only()
         self._render_queue()
 
+    def toggle_settings_panel(self) -> None:
+        self.settings_collapsed = not self.settings_collapsed
+        self._apply_settings_visibility()
+        self.auto_save("설정 접기/펼치기 변경")
+
+    def _apply_settings_visibility(self) -> None:
+        if self.settings_collapsed:
+            try:
+                self.settings_frame.pack_forget()
+            except Exception:
+                pass
+            self.settings_toggle_btn.configure(text="⚙ 설정 펼치기")
+        else:
+            if not self.settings_frame.winfo_manager():
+                self.settings_frame.pack(fill="x", before=self.lower_frame)
+            self.settings_toggle_btn.configure(text="⚙ 설정 접기")
+
     def refresh_summary_only(self) -> None:
-        self.project_summary_var.set("사이트: grok.com/imagine")
+        attach_url = str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222").strip()
+        self.project_summary_var.set(f"사이트: grok.com/imagine | 기존 Edge 연결")
+        self.attach_url_var.set(f"기존 Edge 연결 고정 | {attach_url}")
         slots = self.cfg.get("prompt_slots") or []
         slot_idx = int(self.cfg.get("prompt_slot_index", 0) or 0)
         if slots:
@@ -360,10 +455,11 @@ class GrokWorkerApp:
         self.start_entry.configure(state=state_range)
         self.end_entry.configure(state=state_range)
         self.manual_entry.configure(state=state_manual)
-        self.auto_save("번호 방식 변경")
+        if not self._suspend_auto_save:
+            self.auto_save("번호 방식 변경")
 
     def prompt_slot_changed(self) -> None:
-        if self.prompt_slot_var.get().strip():
+        if (not self._suspend_auto_save) and self.prompt_slot_var.get().strip():
             self.auto_save("프롬프트 파일 선택 변경")
 
     def add_prompt_file(self) -> None:
@@ -430,58 +526,39 @@ class GrokWorkerApp:
         except Exception:
             messagebox.showinfo("파일 경로", str(path), parent=self.root)
 
-    def choose_reference_dir(self) -> None:
-        path = filedialog.askdirectory(parent=self.root, title="레퍼런스 이미지 폴더 선택")
-        if path:
-            self.reference_image_dir_var.set(path)
-            self.auto_save("레퍼런스 이미지 폴더 변경")
-
     def choose_download_dir(self) -> None:
         path = filedialog.askdirectory(parent=self.root, title="저장 폴더 선택")
         if path:
             self.download_dir_var.set(path)
             self.auto_save("저장 폴더 변경")
 
-    def choose_browser_profile_dir(self) -> None:
-        path = filedialog.askdirectory(parent=self.root, title="브라우저 프로필 폴더 선택")
-        if path:
-            self.browser_profile_var.set(path)
-            self.auto_save("브라우저 프로필 변경")
-
-    def create_new_profile(self) -> None:
-        runtime_dir = (self.base_dir / "runtime").resolve()
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        idx = 1
-        while True:
-            path = runtime_dir / f"browser_profile_{idx}"
-            if not path.exists():
-                path.mkdir(parents=True, exist_ok=True)
-                self.browser_profile_var.set(str(path))
-                self.auto_save("새 브라우저 프로필 생성")
-                break
-            idx += 1
-
-    def rename_worker(self) -> None:
-        current = self.worker_name_var.get().strip()
-        new_name = simpledialog.askstring("워커 이름 변경", "새 워커 이름을 입력하세요:", parent=self.root, initialvalue=current)
-        if not new_name:
-            return
-        self.worker_name_var.set(new_name.strip())
-        self.auto_save("워커 이름 변경")
-
     def open_browser_window(self) -> None:
         self._write_vars_to_config()
         url = str(self.cfg.get("grok_site_url") or "https://grok.com/imagine")
-        profile_dir = str(self.cfg.get("browser_profile_dir") or (self.base_dir / "runtime" / "browser_profile_1"))
-        self.browser.open_project(url, profile_dir)
+        profile_dir = str(self.base_dir / "runtime" / "browser_profile_1")
+        launch_mode = "edge_attach"
+        attach_url = str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222")
+        self.browser.open_project(url, profile_dir, launch_mode, attach_url)
 
     def start_run(self) -> None:
         if self.run_thread and self.run_thread.is_alive():
             messagebox.showwarning("실행 중", "이미 작업이 실행 중입니다.", parent=self.root)
             return
         self._write_vars_to_config()
-        save_config(self.base_dir, self.cfg)
+        save_config(self.base_dir, self.cfg, self.config_name)
         plan = GrokAutomationEngine(self.base_dir, self.cfg).build_plan()
+        if not plan.items:
+            self.queue_items = []
+            self._render_queue()
+            self._refresh_progress_display()
+            self.status_var.set("선택된 작업 없음")
+            if str(self.cfg.get("number_mode") or "") == "manual" and not str(self.cfg.get("manual_numbers") or "").strip():
+                messagebox.showwarning("개별 번호 비어 있음", "지금은 `개별`이 켜져 있는데 번호칸이 비어 있어요.\n번호를 적거나 `연속`으로 바꿔주세요.", parent=self.root)
+                self.log("작업 준비 실패: 개별 번호칸이 비어 있어서 실행할 작업이 없습니다.")
+            else:
+                self.log("작업 준비: 선택된 작업 없음")
+            return
+        self._open_run_log_file()
         self.queue_items = [
             QueueItem(number=item.number, tag=item.tag, prompt=item.rendered_prompt, status="pending", message=item.body)
             for item in plan.items
@@ -489,9 +566,6 @@ class GrokWorkerApp:
         self.log(f"작업 준비: {plan.selection_summary}")
         self._render_queue()
         self._refresh_progress_display()
-        if not self.queue_items:
-            self.status_var.set("선택된 작업 없음")
-            return
         self.stop_event.clear()
         self.pause_event.clear()
         self.status_var.set("작업 시작")
@@ -618,13 +692,15 @@ class GrokWorkerApp:
         line = str(message or "").strip()
         if not line:
             return
-        self.log_lines.append(line)
+        stamped = f"[{datetime.now().strftime('%H:%M:%S')}] {line}"
+        self.log_lines.append(stamped)
         self.log_lines = self.log_lines[-400:]
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.insert("end", "\n".join(self.log_lines))
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+        self._write_run_log_line(stamped)
 
     def _current_prompt_slot(self) -> dict:
         current = self.prompt_slot_var.get().strip()
@@ -639,12 +715,25 @@ class GrokWorkerApp:
         except Exception:
             return default
 
+    def _nonnegative_int_or_default(self, value, default: int) -> int:
+        try:
+            return max(0, int(str(value).strip()))
+        except Exception:
+            return default
+
+    def _float_or_default(self, value, default: float) -> float:
+        try:
+            return max(0.0, round(float(str(value).strip()), 1))
+        except Exception:
+            return default
+
     def on_close(self) -> None:
         self.stop_event.set()
         self.pause_event.clear()
         self._write_vars_to_config()
-        save_config(self.base_dir, self.cfg)
+        save_config(self.base_dir, self.cfg, self.config_name)
         self.browser.stop()
+        self._close_run_log_file()
         self.root.destroy()
 
     def _run_plan_thread(self, plan) -> None:
@@ -664,6 +753,7 @@ class GrokWorkerApp:
         finally:
             self.root.after(0, self._render_queue)
             self.root.after(0, self._refresh_progress_display)
+            self.root.after(0, self._close_run_log_file)
 
     def _thread_wait_if_paused(self) -> None:
         while self.pause_event.is_set() and not self.stop_event.is_set():
@@ -689,3 +779,30 @@ class GrokWorkerApp:
 
     def run(self) -> None:
         self.root.mainloop()
+
+    def _open_run_log_file(self) -> None:
+        self._close_run_log_file()
+        logs_dir = self.base_dir / LOGS_DIR
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_slug = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(self.config_name).stem).strip("_") or "worker"
+        self.run_log_path = logs_dir / f"grok_worker_run_{log_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        self.run_log_fp = self.run_log_path.open("a", encoding="utf-8")
+        self.log(f"로그 파일 생성: {self.run_log_path}")
+
+    def _write_run_log_line(self, line: str) -> None:
+        if self.run_log_fp is None:
+            return
+        try:
+            self.run_log_fp.write(line + "\n")
+            self.run_log_fp.flush()
+        except Exception:
+            pass
+
+    def _close_run_log_file(self) -> None:
+        if self.run_log_fp is not None:
+            try:
+                self.run_log_fp.flush()
+                self.run_log_fp.close()
+            except Exception:
+                pass
+        self.run_log_fp = None

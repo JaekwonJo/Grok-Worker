@@ -55,25 +55,36 @@ Grok Imagine 전용 자동화 프로젝트입니다.
 ## 프롬프트 형식
 
 ```txt
-001 : @S999 sits, @S998 stands. dramatic lighting
-|||
-
-002 : @S997 looks shocked, @S999 points forward.
-|||
+S001 Prompt : @S999 sits, @S998 stands. dramatic lighting |||
+S002 Prompt : @S997 looks shocked, @S999 points forward. |||
 ```
 
-실제 입력창에는 자동으로 이렇게 들어갑니다.
+standalone `Grok Worker` 테스트 모드는 현재 Flow Classic Plus 이미지 워커처럼
+프롬프트 원문을 그대로 읽고 그대로 입력합니다.
 
-```txt
-S001 Prompt : @S999 sits, @S998 stands. dramatic lighting
-```
+## 병렬 실행
 
-즉:
+2026-04-12 기준으로 standalone `Grok Worker`는 병렬 실행도 지원합니다.
 
-- `001`은 작업 번호
-- `@S999`, `@S998`는 Grok에 미리 올려 둔 이미지 이름
-- 실제 입력창에는 `@`가 유지된 본문이 들어감
-- 실행할 때 `+` 패널에서 같은 이름 이미지를 찾아 자동 선택함
+- 각 워커는 **설정 파일을 따로 저장**합니다.
+- 각 워커는 **서로 다른 Edge 디버그 포트**에 붙을 수 있습니다.
+- 예:
+  - 워커1 -> `9222`
+  - 워커2 -> `9223`
+  - 워커3 -> `9224`
+
+원클릭 파일:
+
+- `4_병렬_워커_실행.bat`
+- `5_병렬_워커_2개_실행.bat`
+- `6_병렬_워커_3개_실행.bat`
+
+권장 사용 순서:
+
+1. 위 배치파일 실행
+2. 뜬 Edge 창마다 서로 다른 계정으로 로그인
+3. 각 워커 창에서 프롬프트/저장폴더를 따로 설정
+4. 동시에 실행
 
 ## 보관 상태인 예전 앱
 
@@ -87,3 +98,12 @@ S001 Prompt : @S999 sits, @S998 stands. dramatic lighting
 - `Grok_Start.vbs`
 
 이쪽은 더 이상 주 개발축이 아닙니다.
+
+다만 2026-04-12 기준으로, standalone 앱에는 `기존 Edge 창 연결` 테스트 모드를 추가했습니다.
+
+- 목적: 이미 사람이 로그인해서 쓰는 Edge 세션을 재사용할 수 있는지 확인
+- 방식: `connect_over_cdp`
+- 조건: Edge가 미리 원격 디버깅 포트로 켜져 있어야 함
+- 예: `msedge.exe --remote-debugging-port=9222`
+- 쉬운 실행용 파일: `3_기존Edge_그록연결용_열기.bat`
+- CMD 한글 깨짐 대비 ASCII 실행용 파일: `3_open_edge_for_grok.cmd`
