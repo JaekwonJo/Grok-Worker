@@ -237,6 +237,54 @@ class GrokAutomationEngine:
         text = str(exc)
         return ("참조 이미지 파일을 찾지 못했습니다" in text) or ("참조 이미지 매핑을 찾지 못했습니다" in text)
 
+    def _is_video_toolbar_noise(self, locator) -> bool:
+        try:
+            text = (locator.inner_text(timeout=100) or "").strip().lower().replace(" ", "")
+        except Exception:
+            text = ""
+        try:
+            aria = (locator.get_attribute("aria-label") or "").strip().lower().replace(" ", "")
+        except Exception:
+            aria = ""
+        blob = f"{text} {aria}"
+        return any(
+            token in blob
+            for token in (
+                "오른쪽으로스크롤",
+                "왼쪽으로스크롤",
+                "스크롤",
+                "음소거",
+                "동영상다시만들기",
+                "다시만들기",
+                "재생",
+                "정지",
+                "비디오",
+                "이미지",
+                "cancel",
+                "내선택확인",
+                "공유링크만들기",
+                "공유",
+                "좋아요",
+                "싫어요",
+                "프리셋",
+                "normal",
+                "확장",
+                "비디오삭제",
+                "scroll",
+                "mute",
+                "remake",
+                "recreate",
+                "play",
+                "pause",
+                "stop",
+                "video",
+                "image",
+                "share",
+                "like",
+                "dislike",
+            )
+        )
+
     def _resolve_profile_dir(self) -> Path:
         raw = str(self.cfg.get("browser_profile_dir") or "").strip()
         if not raw:
@@ -1658,54 +1706,7 @@ class GrokAutomationEngine:
                     loc = locator.nth(idx)
                     if not loc.is_visible():
                         continue
-                    text = (loc.inner_text(timeout=100) or "").strip()
-                    aria = (loc.get_attribute("aria-label") or "").strip()
-                    lowered_text = text.lower().replace(" ", "")
-                    lowered_aria = aria.lower().replace(" ", "")
-                    if any(
-                        token in lowered_text
-                        for token in (
-                            "오른쪽으로스크롤",
-                            "왼쪽으로스크롤",
-                            "스크롤",
-                            "음소거",
-                            "동영상다시만들기",
-                            "다시만들기",
-                            "재생",
-                            "정지",
-                            "비디오",
-                            "이미지",
-                            "cancel",
-                            "내선택확인",
-                            "공유링크만들기",
-                            "공유",
-                            "좋아요",
-                            "싫어요",
-                            "프리셋",
-                            "normal",
-                            "확장",
-                            "비디오삭제",
-                        )
-                    ):
-                        continue
-                    if any(
-                        token in lowered_aria
-                        for token in (
-                            "scroll",
-                            "mute",
-                            "remake",
-                            "recreate",
-                            "play",
-                            "pause",
-                            "stop",
-                            "video",
-                            "image",
-                            "share",
-                            "like",
-                            "dislike",
-                            "cancel",
-                        )
-                    ):
+                    if self._is_video_toolbar_noise(loc):
                         continue
                     box = loc.bounding_box()
                     if not box:
@@ -1734,11 +1735,20 @@ class GrokAutomationEngine:
                         if self._is_more_button(loc):
                             more_index = idx
                             break
-                    if more_index >= 0:
-                        if more_index - 2 >= 0:
-                            candidate = video_toolbar[more_index - 2][1]
-                            if not self._is_more_button(candidate):
-                                _push(candidate)
+                    if more_index < 0:
+                        more_index = len(video_toolbar) - 1
+                    candidate_indexes = []
+                    for offset in (2, 1, 3):
+                        idx = more_index - offset
+                        if idx >= 0:
+                            candidate_indexes.append(idx)
+                    for idx in candidate_indexes:
+                        candidate = video_toolbar[idx][1]
+                        if self._is_more_button(candidate):
+                            continue
+                        if self._is_video_toolbar_noise(candidate):
+                            continue
+                        _push(candidate)
                 return results
             else:
                 # 이미지는 보통 맨 아래는 더보기, 그 위가 다운로드인 경우가 많습니다.
