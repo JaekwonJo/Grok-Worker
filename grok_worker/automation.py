@@ -1434,6 +1434,7 @@ class GrokAutomationEngine:
                 target = download_dir / f"@{item.tag}{ext}"
                 target = self._unique_path(target)
                 download.save_as(str(target))
+                self._dismiss_browser_download_panel(page, log)
                 return target
             except Exception as exc:
                 last_error = exc
@@ -1755,7 +1756,21 @@ class GrokAutomationEngine:
         target = download_dir / f"@{item.tag}{ext}"
         target = self._unique_path(target)
         download.save_as(str(target))
+        self._dismiss_browser_download_panel(page, log)
         return target
+
+    def _dismiss_browser_download_panel(self, page, log: LogFn | None = None) -> None:
+        try:
+            page.keyboard.press("Escape")
+            time.sleep(0.12)
+            page.keyboard.press("Escape")
+            time.sleep(0.12)
+            viewport = page.viewport_size or {"width": 1440, "height": 940}
+            page.mouse.click(float(viewport["width"]) * 0.5, float(viewport["height"]) * 0.5)
+            if log is not None:
+                log("🧹 다운로드 패널 닫기 시도")
+        except Exception:
+            pass
 
     def _find_video_more_button(self, page, require_enabled: bool = False):
         viewport = page.viewport_size or {"width": 1440, "height": 940}

@@ -9,7 +9,7 @@ If Not fso.FolderExists(profilePath) Then
 End If
 
 WshShell.CurrentDirectory = basePath
-WshShell.Run "cmd /c start """" msedge --remote-debugging-port=9223 --user-data-dir=""""" & profilePath & """"" --new-window https://grok.com/imagine", 0, False
+WshShell.Run "cmd /c start """" msedge --remote-debugging-port=9223 --user-data-dir=""""" & profilePath & """"" --disable-features=msDownloadsHub,DownloadBubble,DownloadBubbleV2 --new-window https://grok.com/imagine", 0, False
 
 Set fso = Nothing
 Set WshShell = Nothing
