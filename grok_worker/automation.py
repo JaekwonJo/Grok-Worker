@@ -156,6 +156,12 @@ class GrokAutomationEngine:
                                 self._safe_recover(page, log)
                                 return
                             self._save_debug_screenshot(page, item.tag, log)
+                            if self._is_missing_reference_exception(exc):
+                                update_queue(item.number, "failed", str(exc), "")
+                                set_status(f"{item.tag} 참조 없음")
+                                log(f"⚠️ {item.tag} 참조 이미지가 없어 바로 다음 장면으로 넘어갑니다: {exc}")
+                                self._safe_recover(page, log)
+                                break
                             if attempt < max_attempts and not should_stop():
                                 log(f"⚠️ {item.tag} 실패, 1회 재시도합니다: {exc}")
                                 set_status(f"{item.tag} 재시도 준비")
@@ -226,6 +232,10 @@ class GrokAutomationEngine:
 
     def _is_user_stop_exception(self, exc: Exception) -> bool:
         return "사용자 중지" in str(exc)
+
+    def _is_missing_reference_exception(self, exc: Exception) -> bool:
+        text = str(exc)
+        return ("참조 이미지 파일을 찾지 못했습니다" in text) or ("참조 이미지 매핑을 찾지 못했습니다" in text)
 
     def _resolve_profile_dir(self) -> Path:
         raw = str(self.cfg.get("browser_profile_dir") or "").strip()
