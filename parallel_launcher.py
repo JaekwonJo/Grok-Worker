@@ -3,7 +3,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
@@ -26,15 +25,6 @@ def find_python_command() -> str:
     return sys.executable
 
 
-def edge_window_position(index: int) -> tuple[int, int]:
-    positions = {
-        1: (20, 20),
-        2: (140, 60),
-        3: (260, 100),
-    }
-    return positions.get(index, (20 + (index - 1) * 420, 20))
-
-
 def worker_window_geometry(index: int) -> str:
     geometries = {
         1: "920x560+20+520",
@@ -42,25 +32,6 @@ def worker_window_geometry(index: int) -> str:
         3: "920x560+20+520",
     }
     return geometries.get(index, f"920x560+{20 + (index - 1) * 420}+520")
-
-
-def launch_edge(base_dir: Path, edge_exe: str, index: int) -> None:
-    port = 9221 + index
-    profile_dir = base_dir / "runtime" / f"edge_attach_profile_{index}"
-    profile_dir.mkdir(parents=True, exist_ok=True)
-    pos_x, pos_y = edge_window_position(index)
-    subprocess.Popen(
-        [
-            edge_exe,
-            f"--remote-debugging-port={port}",
-            f"--user-data-dir={profile_dir}",
-            f"--window-position={pos_x},{pos_y}",
-            "--window-size=1280,860",
-            "--new-window",
-            "https://grok.com/imagine",
-        ],
-        cwd=str(base_dir),
-    )
 
 
 def launch_worker(base_dir: Path, python_cmd: str, index: int) -> None:
@@ -90,24 +61,22 @@ def main() -> int:
 
     count = int(raw)
     base_dir = Path(__file__).resolve().parent
-    edge_exe = find_edge_executable()
     python_cmd = find_python_command()
 
     print(f"[INFO] Preparing {count} parallel workers.")
-    for index in range(1, count + 1):
-        port = 9221 + index
-        print(f"[INFO] Opening Edge {index} on port {port}")
-        launch_edge(base_dir, edge_exe, index)
-
-    print("[INFO] Waiting 2 seconds before opening worker windows...")
-    time.sleep(2.0)
+    print("[INFO] Edge는 사용자가 먼저 직접 열고 로그인해야 합니다.")
+    print("[INFO] Worker 1 -> http://127.0.0.1:9222")
+    if count >= 2:
+        print("[INFO] Worker 2 -> http://127.0.0.1:9223")
+    if count >= 3:
+        print("[INFO] Worker 3 -> http://127.0.0.1:9224")
 
     for index in range(1, count + 1):
         port = 9221 + index
         print(f"[INFO] Opening worker {index} on port {port}")
         launch_worker(base_dir, python_cmd, index)
 
-    print("[INFO] Done. Sign in with different accounts in each Edge window.")
+    print("[INFO] Done. 각 워커에 맞는 Edge 창에 로그인한 뒤 사용하세요.")
     return 0
 
 

@@ -64,10 +64,9 @@ standalone `Grok Worker` 테스트 모드는 현재 Flow Classic Plus 이미지 
 
 추가로 2026-04-12 기준으로 standalone `Grok Worker`는:
 
-- 실행하면 연결된 Edge를 자동으로 띄웁니다.
-- 창을 닫으면 연결된 Edge도 같이 닫습니다.
 - `이미지 / 비디오` 모드를 모두 지원합니다.
 - 비디오 모드에서는 `480p / 720p`, `6s / 10s`, `16:9`를 자동으로 맞춥니다.
+- Edge는 반드시 사용자가 먼저 직접 열고 로그인한 뒤 연결하는 방식으로 사용합니다.
 
 ## 병렬 실행
 
@@ -91,10 +90,14 @@ standalone `Grok Worker` 테스트 모드는 현재 Flow Classic Plus 이미지 
 
 권장 사용 순서:
 
-1. 위 배치파일 실행
-2. 뜬 Edge 창마다 서로 다른 계정으로 로그인
-3. 각 워커 창에서 프롬프트/저장폴더를 따로 설정
-4. 동시에 실행
+1. 먼저 Edge를 각 포트별로 직접 열기
+   - 워커1: `3_open_edge_for_grok.cmd`
+   - 워커2: `4_open_edge_for_worker2.cmd`
+   - 워커3: `7_open_edge_for_worker3.cmd`
+2. 각 Edge 창마다 서로 다른 계정으로 로그인
+3. 그 다음 병렬 워커 배치파일 실행
+4. 각 워커 창에서 프롬프트/저장폴더를 따로 설정
+5. 동시에 실행
 
 ## 보관 상태인 예전 앱
 
@@ -117,3 +120,5 @@ standalone `Grok Worker` 테스트 모드는 현재 Flow Classic Plus 이미지 
 - 예: `msedge.exe --remote-debugging-port=9222`
 - 쉬운 실행용 파일: `3_기존Edge_그록연결용_열기.bat`
 - CMD 한글 깨짐 대비 ASCII 실행용 파일: `3_open_edge_for_grok.cmd`
+- 워커2용 ASCII 실행용 파일: `4_open_edge_for_worker2.cmd`
+- 워커3용 ASCII 실행용 파일: `7_open_edge_for_worker3.cmd`

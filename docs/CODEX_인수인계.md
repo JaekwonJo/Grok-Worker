@@ -103,3 +103,4 @@
 - 2026-04-12: standalone `Grok Worker`는 이제 병렬 실행도 가능하도록 보강. `main.py`에 `--instance / --attach-url / --worker-name` 인자를 추가했고, 워커별 설정 파일을 `grok_worker_config_worker2.json`처럼 따로 저장하게 변경. `4_병렬_워커_실행.bat`, `5_병렬_워커_2개_실행.bat`, `6_병렬_워커_3개_실행.bat`로 Edge 9222/9223/9224와 워커 1/2/3을 한 번에 띄우는 흐름 추가
 - 2026-04-12: standalone `Grok Worker`는 이제 실행 직후 연결 Edge를 자동으로 띄우고, 프로그램 종료 시 같은 디버그 포트 Edge도 같이 닫도록 보강. `browser.py`가 `--remote-debugging-port` 포트를 보고 Edge를 자동 실행/정리함
 - 2026-04-12: standalone `Grok Worker`에 `이미지 / 비디오` 작업 모드를 추가. 비디오 모드에서는 `720p / 10s / 16:9` 같은 생성 옵션을 프롬프트 입력 전에 자동으로 맞추도록 보강
+- 2026-04-12: 위 자동 Edge 실행/종료는 실제 로그인 차단 문제가 있어 다시 철회. 현재 원칙은 `사람이 먼저 Edge를 직접 열고 로그인 -> 워커가 connect_over_cdp로 붙기`이며, 병렬 실행도 `parallel_launcher.py`가 Edge는 건드리지 않고 워커 창만 여는 쪽으로 수정

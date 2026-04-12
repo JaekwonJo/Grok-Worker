@@ -63,7 +63,6 @@ class GrokWorkerApp:
         self._apply_media_visibility()
         self._suspend_auto_save = False
         self.refresh_all()
-        self.root.after(400, self._auto_open_browser_on_start)
 
     def _build_vars(self) -> None:
         self.worker_name_var = tk.StringVar()
@@ -545,12 +544,6 @@ class GrokWorkerApp:
         self._refresh_progress_display()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
 
-    def _auto_open_browser_on_start(self) -> None:
-        try:
-            self.open_browser_window()
-        except Exception as exc:
-            self.log(f"⚠️ 시작 시 Edge 자동 열기 실패: {exc}")
-
     def _refresh_prompt_menu(self) -> None:
         menu = self.prompt_menu["menu"]
         menu.delete(0, "end")
@@ -847,7 +840,7 @@ class GrokWorkerApp:
         self.pause_event.clear()
         self._write_vars_to_config()
         save_config(self.base_dir, self.cfg, self.config_name)
-        self.browser.stop(close_window=True)
+        self.browser.stop()
         self._close_run_log_file()
         self.root.destroy()
 
