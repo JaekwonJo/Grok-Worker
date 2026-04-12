@@ -1337,9 +1337,25 @@ class GrokAutomationEngine:
             timeout_seconds=timeout_seconds,
         )
         if not download_buttons:
+            if self._media_mode() == "video":
+                try:
+                    log("🎬 비디오 다운로드: 더보기 메뉴 경로 시도")
+                    return self._download_video_via_more_menu(page=page, item=item, download_dir=download_dir, log=log)
+                except Exception as exc:
+                    raise RuntimeError(str(exc)) from exc
             raise RuntimeError("다운로드 버튼을 찾지 못했습니다.")
         set_status(f"{item.tag} 다운로드 클릭")
         last_error = None
+        direct_buttons = [button for button in download_buttons if self._is_download_button(button)]
+        if direct_buttons:
+            download_buttons = direct_buttons
+        elif self._media_mode() == "video" and any(self._is_more_button(button) for button in download_buttons):
+            try:
+                log("🎬 비디오 다운로드: 활성 추가 옵션 경로 시도")
+                return self._download_video_via_more_menu(page=page, item=item, download_dir=download_dir, log=log)
+            except Exception as exc:
+                raise RuntimeError(str(exc)) from exc
+
         for idx, download_button in enumerate(download_buttons, start=1):
             try:
                 log(f"⬇️ 다운로드 후보 {idx}: {self._describe_locator(download_button)}")
@@ -1450,6 +1466,10 @@ class GrokAutomationEngine:
             buttons = self._locate_download_buttons(page)
             if buttons:
                 return buttons
+            if self._media_mode() == "video":
+                more_button = self._find_video_more_button(page, require_enabled=True)
+                if more_button is not None:
+                    return [more_button]
             if not opened_result:
                 try:
                     set_status(f"{item_tag} 결과 카드 여는 중")
@@ -1517,6 +1537,8 @@ class GrokAutomationEngine:
                 _push(label.first)
         except Exception:
             pass
+        if self._media_mode() == "video":
+            return results
         viewport = page.viewport_size or {"width": 1440, "height": 940}
         toolbar_candidates = []
         for selector in ("button", "[role='button']"):
@@ -1561,7 +1583,7 @@ class GrokAutomationEngine:
         return results
 
     def _download_video_via_more_menu(self, *, page, item: PromptBlock, download_dir: Path, log: LogFn) -> Path:
-        more_button = self._find_video_more_button(page)
+        more_button = self._find_video_more_button(page, require_enabled=True)
         if more_button is None:
             raise RuntimeError("비디오 더보기 버튼을 찾지 못했습니다.")
         log(f"🎬 더보기 버튼: {self._describe_locator(more_button)}")
@@ -1581,7 +1603,7 @@ class GrokAutomationEngine:
         download.save_as(str(target))
         return target
 
-    def _find_video_more_button(self, page):
+    def _find_video_more_button(self, page, require_enabled: bool = False):
         viewport = page.viewport_size or {"width": 1440, "height": 940}
         best = None
         best_score = -1.0
@@ -1594,6 +1616,8 @@ class GrokAutomationEngine:
                 try:
                     loc = page.locator(selector).nth(idx)
                     if not loc.is_visible():
+                        continue
+                    if require_enabled and not self._locator_is_enabled(loc):
                         continue
                     box = loc.bounding_box()
                     if not box:
@@ -1625,6 +1649,28 @@ class GrokAutomationEngine:
                 except Exception:
                     continue
         return best
+
+    def _is_download_button(self, locator) -> bool:
+        try:
+            text = (locator.inner_text(timeout=100) or "").strip().lower()
+        except Exception:
+            text = ""
+        try:
+            aria = (locator.get_attribute("aria-label") or "").strip().lower()
+        except Exception:
+            aria = ""
+        return ("다운로드" in text) or ("download" in text) or ("다운로드" in aria) or ("download" in aria)
+
+    def _is_more_button(self, locator) -> bool:
+        try:
+            text = (locator.inner_text(timeout=100) or "").strip().lower()
+        except Exception:
+            text = ""
+        try:
+            aria = (locator.get_attribute("aria-label") or "").strip().lower()
+        except Exception:
+            aria = ""
+        return ("추가 옵션" in text) or ("추가 옵션" in aria) or ("more" in text) or ("more" in aria)
 
     def _find_download_menu_item(self, page):
         for selector in ("button", "[role='menuitem']", "[role='button']", "div", "span"):
