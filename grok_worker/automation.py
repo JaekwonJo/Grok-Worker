@@ -1452,6 +1452,10 @@ class GrokAutomationEngine:
         timeout_seconds: float,
     ) -> list:
         deadline = time.time() + max(0.5, timeout_seconds)
+        video_probe_delay = 0.0
+        if self._media_mode() == "video":
+            video_probe_delay = min(max(0.0, timeout_seconds), 90.0)
+        probe_after = time.time() + video_probe_delay
         opened_result = False
         last_remaining = None
         extended_once = False
@@ -1462,7 +1466,14 @@ class GrokAutomationEngine:
             remaining = max(0, int(math.ceil(deadline - time.time())))
             if remaining != last_remaining:
                 last_remaining = remaining
-                set_status(f"{item_tag} 생성 대기 {remaining}초")
+                if self._media_mode() == "video" and time.time() < probe_after:
+                    probe_remaining = max(0, int(math.ceil(probe_after - time.time())))
+                    set_status(f"{item_tag} 비디오 생성 중 {probe_remaining}초")
+                else:
+                    set_status(f"{item_tag} 생성 대기 {remaining}초")
+            if self._media_mode() == "video" and time.time() < probe_after:
+                time.sleep(0.4)
+                continue
             buttons = self._locate_download_buttons(page)
             if buttons:
                 return buttons
