@@ -62,6 +62,13 @@ S002 Prompt : @S997 looks shocked, @S999 points forward. |||
 standalone `Grok Worker` 테스트 모드는 현재 Flow Classic Plus 이미지 워커처럼
 프롬프트 원문을 그대로 읽고 그대로 입력합니다.
 
+추가로 2026-04-12 기준으로 standalone `Grok Worker`는:
+
+- 실행하면 연결된 Edge를 자동으로 띄웁니다.
+- 창을 닫으면 연결된 Edge도 같이 닫습니다.
+- `이미지 / 비디오` 모드를 모두 지원합니다.
+- 비디오 모드에서는 `480p / 720p`, `6s / 10s`, `16:9`를 자동으로 맞춥니다.
+
 ## 병렬 실행
 
 2026-04-12 기준으로 standalone `Grok Worker`는 병렬 실행도 지원합니다.

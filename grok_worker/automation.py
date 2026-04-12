@@ -75,11 +75,13 @@ class GrokAutomationEngine:
         next_prompt_wait_seconds = self._next_prompt_wait_seconds()
         break_every_count = self._break_every_count()
         break_minutes = self._break_minutes()
+        media_mode = self._media_mode()
 
         set_status("브라우저 준비 중")
         log(f"🌐 Grok 실행 시작 | {plan.selection_summary}")
         log("📝 그록워커 방식: 프롬프트 안의 @S001/@S994 같은 참조를 먼저 업로드하고, 입력 중에는 Image 1~5 선택으로 처리합니다.")
         log(f"⏱️ 생성 후 다운로드 대기: {generate_wait_seconds:.1f}초 | 다운로드 후 다음 작업 대기: {next_prompt_wait_seconds:.1f}초")
+        log(f"🎛️ 작업 모드: {self._media_summary()}")
 
         with sync_playwright() as p:
             context = None
@@ -101,6 +103,8 @@ class GrokAutomationEngine:
                         return
                     wait_if_paused()
                     update_queue(item.number, "running", f"{item.tag} 실행 중", "")
+                    set_status(f"{item.tag} {('비디오' if media_mode == 'video' else '이미지')} 옵션 맞추는 중")
+                    self._apply_generation_settings(page, item.tag, log, set_status)
                     set_status(f"{item.tag} 입력 중 ({idx}/{total})")
                     log(f"✍️ 프롬프트 입력 시작: {item.tag}")
                     try:
@@ -244,6 +248,23 @@ class GrokAutomationEngine:
         raw = float(self.cfg.get("break_minutes", 0.0) or 0.0)
         return max(0.0, raw)
 
+    def _media_mode(self) -> str:
+        return str(self.cfg.get("media_mode") or "image").strip().lower() or "image"
+
+    def _video_quality(self) -> str:
+        return str(self.cfg.get("video_quality") or "720p").strip() or "720p"
+
+    def _video_duration(self) -> str:
+        return str(self.cfg.get("video_duration") or "10s").strip() or "10s"
+
+    def _aspect_ratio(self) -> str:
+        return str(self.cfg.get("aspect_ratio") or "16:9").strip() or "16:9"
+
+    def _media_summary(self) -> str:
+        if self._media_mode() == "video":
+            return f"비디오 | {self._video_quality()} | {self._video_duration()} | {self._aspect_ratio()}"
+        return f"이미지 | {self._aspect_ratio()}"
+
     def _browser_launch_mode(self) -> str:
         return str(self.cfg.get("browser_launch_mode") or "managed").strip().lower() or "managed"
 
@@ -343,6 +364,70 @@ class GrokAutomationEngine:
                     continue
             time.sleep(0.5)
         raise RuntimeError("Grok 입력창을 찾지 못했습니다.")
+
+    def _apply_generation_settings(self, page, item_tag: str, log: LogFn, set_status: StatusFn) -> None:
+        mode = self._media_mode()
+        targets = [("모드", "비디오" if mode == "video" else "이미지")]
+        if mode == "video":
+            targets.append(("품질", self._video_quality()))
+            targets.append(("길이", self._video_duration()))
+        targets.append(("비율", self._aspect_ratio()))
+        for label, target in targets:
+            set_status(f"{item_tag} {label} 설정 중")
+            if self._click_generation_option(page, target):
+                log(f"🎚️ {label} 설정: {target}")
+            else:
+                log(f"⚠️ {label} 설정 버튼을 못 찾아 그대로 진행: {target}")
+            time.sleep(0.12)
+
+    def _click_generation_option(self, page, label: str) -> bool:
+        input_loc = self._find_prompt_input(page)
+        input_box = None
+        if input_loc is not None:
+            try:
+                input_box = input_loc.bounding_box()
+            except Exception:
+                input_box = None
+        target = str(label or "").strip().lower().replace(" ", "")
+        best = None
+        best_score = -1.0
+        for selector in ("button", "[role='button']", "div"):
+            try:
+                count = min(page.locator(selector).count(), 140)
+            except Exception:
+                continue
+            for idx in range(count):
+                try:
+                    loc = page.locator(selector).nth(idx)
+                    if not loc.is_visible():
+                        continue
+                    box = loc.bounding_box()
+                    if not box:
+                        continue
+                    if input_box and box["y"] < (input_box["y"] - 80):
+                        continue
+                    text = (loc.inner_text(timeout=80) or "").strip()
+                    aria = (loc.get_attribute("aria-label") or "").strip()
+                    blob = f"{text} {aria}".lower().replace(" ", "")
+                    if target not in blob:
+                        continue
+                    score = 0.0
+                    if input_box:
+                        score += 1800 - abs((box["y"] + box["height"] / 2.0) - (input_box["y"] + input_box["height"] / 2.0))
+                        score += 600 - min(600, abs(box["x"] - input_box["x"]))
+                    if 24 <= box["height"] <= 56:
+                        score += 120
+                    if 24 <= box["width"] <= 180:
+                        score += 120
+                    if score > best_score:
+                        best_score = score
+                        best = loc
+                except Exception:
+                    continue
+        if best is None:
+            return False
+        best.click(timeout=4000)
+        return True
 
     def _find_prompt_input(self, page):
         viewport = page.viewport_size or {"width": 1440, "height": 940}

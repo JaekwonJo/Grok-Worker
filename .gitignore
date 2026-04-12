@@ -7,6 +7,7 @@ downloads/
 runtime/
 prompts/
 grok_worker_config.json
+grok_worker_config_worker*.json
 config.local.json
 *.pyc
 *.pyo

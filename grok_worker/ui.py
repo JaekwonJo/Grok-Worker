@@ -60,13 +60,19 @@ class GrokWorkerApp:
         self._build_ui()
         self._load_vars_from_config()
         self._apply_settings_visibility()
+        self._apply_media_visibility()
         self._suspend_auto_save = False
         self.refresh_all()
+        self.root.after(400, self._auto_open_browser_on_start)
 
     def _build_vars(self) -> None:
         self.worker_name_var = tk.StringVar()
         self.prompt_slot_var = tk.StringVar()
         self.download_dir_var = tk.StringVar()
+        self.media_mode_var = tk.StringVar()
+        self.video_quality_var = tk.StringVar()
+        self.video_duration_var = tk.StringVar()
+        self.aspect_ratio_var = tk.StringVar()
         self.number_mode_var = tk.StringVar()
         self.start_number_var = tk.StringVar()
         self.end_number_var = tk.StringVar()
@@ -211,6 +217,79 @@ class GrokWorkerApp:
 
     def _build_number_settings(self, parent: tk.Frame) -> None:
         tk.Label(parent, text="번호 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
+
+        media_mode_row = tk.Frame(parent, bg="#1a2f4f")
+        media_mode_row.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(media_mode_row, text="작업 모드", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        for text, value in (("이미지", "image"), ("비디오", "video")):
+            tk.Radiobutton(
+                media_mode_row,
+                text=text,
+                value=value,
+                variable=self.media_mode_var,
+                command=self.on_media_mode_changed,
+                bg="#1a2f4f",
+                fg="#ffffff",
+                selectcolor="#21314f",
+                activebackground="#1a2f4f",
+                activeforeground="#ffffff",
+                font=("Malgun Gothic", 10),
+            ).pack(side="left", padx=(12, 12))
+
+        self.video_settings_frame = tk.Frame(parent, bg="#1a2f4f")
+        video_row_1 = tk.Frame(self.video_settings_frame, bg="#1a2f4f")
+        video_row_1.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(video_row_1, text="비디오 품질", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        for text, value in (("480p", "480p"), ("720p", "720p")):
+            tk.Radiobutton(
+                video_row_1,
+                text=text,
+                value=value,
+                variable=self.video_quality_var,
+                command=lambda: self.auto_save("비디오 품질 변경"),
+                bg="#1a2f4f",
+                fg="#ffffff",
+                selectcolor="#21314f",
+                activebackground="#1a2f4f",
+                activeforeground="#ffffff",
+                font=("Malgun Gothic", 10),
+            ).pack(side="left", padx=(12, 10))
+
+        video_row_2 = tk.Frame(self.video_settings_frame, bg="#1a2f4f")
+        video_row_2.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(video_row_2, text="길이", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        for text, value in (("6초", "6s"), ("10초", "10s")):
+            tk.Radiobutton(
+                video_row_2,
+                text=text,
+                value=value,
+                variable=self.video_duration_var,
+                command=lambda: self.auto_save("비디오 길이 변경"),
+                bg="#1a2f4f",
+                fg="#ffffff",
+                selectcolor="#21314f",
+                activebackground="#1a2f4f",
+                activeforeground="#ffffff",
+                font=("Malgun Gothic", 10),
+            ).pack(side="left", padx=(12, 10))
+
+        aspect_row = tk.Frame(parent, bg="#1a2f4f")
+        aspect_row.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(aspect_row, text="비율", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Radiobutton(
+            aspect_row,
+            text="16:9",
+            value="16:9",
+            variable=self.aspect_ratio_var,
+            command=lambda: self.auto_save("비율 변경"),
+            bg="#1a2f4f",
+            fg="#ffffff",
+            selectcolor="#21314f",
+            activebackground="#1a2f4f",
+            activeforeground="#ffffff",
+            font=("Malgun Gothic", 10),
+        ).pack(side="left", padx=(12, 10))
+
         mode_row = tk.Frame(parent, bg="#1a2f4f")
         mode_row.pack(fill="x", padx=4, pady=(0, 6))
         for text, value in (("연속", "range"), ("개별", "manual")):
@@ -342,6 +421,10 @@ class GrokWorkerApp:
         slot_index = max(0, min(int(self.cfg.get("prompt_slot_index", 0) or 0), len(slots) - 1))
         self.prompt_slot_var.set(str((slots[slot_index] or {}).get("name") or ""))
         self.download_dir_var.set(str(self.cfg.get("download_output_dir") or ""))
+        self.media_mode_var.set(str(self.cfg.get("media_mode") or "image"))
+        self.video_quality_var.set(str(self.cfg.get("video_quality") or "720p"))
+        self.video_duration_var.set(str(self.cfg.get("video_duration") or "10s"))
+        self.aspect_ratio_var.set(str(self.cfg.get("aspect_ratio") or "16:9"))
         self.number_mode_var.set(str(self.cfg.get("number_mode") or "range"))
         self.start_number_var.set(str(self.cfg.get("start_number", 1) or 1))
         self.end_number_var.set(str(self.cfg.get("end_number", 10) or 10))
@@ -362,6 +445,10 @@ class GrokWorkerApp:
         self.cfg["reference_image_dir"] = selected_dir
         self.cfg["browser_launch_mode"] = "edge_attach"
         self.cfg["browser_attach_url"] = self.forced_attach_url or str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222")
+        self.cfg["media_mode"] = self.media_mode_var.get().strip() or "image"
+        self.cfg["video_quality"] = self.video_quality_var.get().strip() or "720p"
+        self.cfg["video_duration"] = self.video_duration_var.get().strip() or "10s"
+        self.cfg["aspect_ratio"] = self.aspect_ratio_var.get().strip() or "16:9"
         self.cfg["number_mode"] = self.number_mode_var.get().strip() or "range"
         self.cfg["start_number"] = self._int_or_default(self.start_number_var.get(), 1)
         self.cfg["end_number"] = self._int_or_default(self.end_number_var.get(), self.cfg["start_number"])
@@ -400,6 +487,7 @@ class GrokWorkerApp:
         self._refresh_prompt_menu()
         self.on_number_mode_changed()
         self._apply_settings_visibility()
+        self._apply_media_visibility()
         self.refresh_summary_only()
         self._render_queue()
 
@@ -407,6 +495,11 @@ class GrokWorkerApp:
         self.settings_collapsed = not self.settings_collapsed
         self._apply_settings_visibility()
         self.auto_save("설정 접기/펼치기 변경")
+
+    def on_media_mode_changed(self) -> None:
+        self._apply_media_visibility()
+        if not self._suspend_auto_save:
+            self.auto_save("작업 모드 변경")
 
     def _apply_settings_visibility(self) -> None:
         if self.settings_collapsed:
@@ -420,9 +513,20 @@ class GrokWorkerApp:
                 self.settings_frame.pack(fill="x", before=self.lower_frame)
             self.settings_toggle_btn.configure(text="⚙ 설정 접기")
 
+    def _apply_media_visibility(self) -> None:
+        if self.media_mode_var.get().strip() == "video":
+            if not self.video_settings_frame.winfo_manager():
+                self.video_settings_frame.pack(fill="x", padx=0, pady=(0, 2))
+        else:
+            try:
+                self.video_settings_frame.pack_forget()
+            except Exception:
+                pass
+
     def refresh_summary_only(self) -> None:
         attach_url = str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222").strip()
-        self.project_summary_var.set(f"사이트: grok.com/imagine | 기존 Edge 연결")
+        media_label = "비디오" if str(self.cfg.get("media_mode") or "image") == "video" else "이미지"
+        self.project_summary_var.set(f"사이트: grok.com/imagine | 기존 Edge 연결 | {media_label}")
         self.attach_url_var.set(f"기존 Edge 연결 고정 | {attach_url}")
         slots = self.cfg.get("prompt_slots") or []
         slot_idx = int(self.cfg.get("prompt_slot_index", 0) or 0)
@@ -440,6 +544,12 @@ class GrokWorkerApp:
         self._refresh_queue_summary()
         self._refresh_progress_display()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
+
+    def _auto_open_browser_on_start(self) -> None:
+        try:
+            self.open_browser_window()
+        except Exception as exc:
+            self.log(f"⚠️ 시작 시 Edge 자동 열기 실패: {exc}")
 
     def _refresh_prompt_menu(self) -> None:
         menu = self.prompt_menu["menu"]
@@ -537,9 +647,12 @@ class GrokWorkerApp:
     def open_browser_window(self) -> None:
         self._write_vars_to_config()
         url = str(self.cfg.get("grok_site_url") or "https://grok.com/imagine")
-        profile_dir = str(self.base_dir / "runtime" / "browser_profile_1")
-        launch_mode = "edge_attach"
         attach_url = str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222")
+        port_match = re.search(r":(\d+)$", attach_url)
+        port = int(port_match.group(1)) if port_match else 9222
+        profile_index = max(1, port - 9221)
+        profile_dir = str(self.base_dir / "runtime" / f"edge_attach_profile_{profile_index}")
+        launch_mode = "edge_attach"
         self.browser.open_project(url, profile_dir, launch_mode, attach_url)
 
     def start_run(self) -> None:
@@ -734,7 +847,7 @@ class GrokWorkerApp:
         self.pause_event.clear()
         self._write_vars_to_config()
         save_config(self.base_dir, self.cfg, self.config_name)
-        self.browser.stop()
+        self.browser.stop(close_window=True)
         self._close_run_log_file()
         self.root.destroy()
 
