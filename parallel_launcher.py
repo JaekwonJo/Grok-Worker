@@ -29,8 +29,8 @@ def find_python_command() -> str:
 def edge_window_position(index: int) -> tuple[int, int]:
     positions = {
         1: (20, 20),
-        2: (980, 20),
-        3: (20, 560),
+        2: (140, 60),
+        3: (260, 100),
     }
     return positions.get(index, (20 + (index - 1) * 420, 20))
 
@@ -55,7 +55,7 @@ def launch_edge(base_dir: Path, edge_exe: str, index: int) -> None:
             f"--remote-debugging-port={port}",
             f"--user-data-dir={profile_dir}",
             f"--window-position={pos_x},{pos_y}",
-            "--window-size=920,520",
+            "--window-size=1280,860",
             "--new-window",
             "https://grok.com/imagine",
         ],
