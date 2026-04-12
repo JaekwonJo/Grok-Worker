@@ -1594,7 +1594,6 @@ class GrokAutomationEngine:
         probe_after = time.time() + video_probe_delay
         opened_result = False
         last_remaining = None
-        extended_once = False
         while time.time() < deadline:
             if should_stop():
                 return None
@@ -1628,22 +1627,7 @@ class GrokAutomationEngine:
                 except Exception:
                     pass
             time.sleep(0.4)
-            if time.time() >= deadline and not extended_once and self._should_extend_download_wait(page):
-                deadline += 12.0
-                extended_once = True
-                log("⌛ 다운로드 버튼이 아직 안 떠서 12초 추가 대기합니다.")
         return []
-
-    def _should_extend_download_wait(self, page) -> bool:
-        patterns = ("더보기", "생성 중", "생성", "%")
-        for pattern in patterns:
-            try:
-                loc = page.get_by_text(pattern, exact=False)
-                if loc.count() and loc.first.is_visible():
-                    return True
-            except Exception:
-                continue
-        return False
 
     def _locate_download_buttons(self, page) -> list:
         results = []
@@ -1711,11 +1695,11 @@ class GrokAutomationEngine:
                     box = loc.bounding_box()
                     if not box:
                         continue
-                    if box["x"] < viewport["width"] * (0.90 if video_mode else 0.70):
+                    if box["x"] < viewport["width"] * (0.82 if video_mode else 0.70):
                         continue
                     if not (24 <= box["width"] <= 72 and 24 <= box["height"] <= 72):
                         continue
-                    if box["y"] < viewport["height"] * (0.32 if video_mode else 0.12) or box["y"] > viewport["height"] * 0.95:
+                    if box["y"] < viewport["height"] * (0.22 if video_mode else 0.12) or box["y"] > viewport["height"] * 0.95:
                         continue
                     if not self._locator_is_enabled(loc):
                         continue
@@ -1725,7 +1709,7 @@ class GrokAutomationEngine:
         if len(toolbar_candidates) >= 2:
             toolbar_candidates.sort(key=lambda item: item[0])
             if video_mode:
-                video_toolbar = [(y, loc) for y, loc in toolbar_candidates if y > viewport["height"] * 0.45]
+                video_toolbar = [(y, loc) for y, loc in toolbar_candidates if y > viewport["height"] * 0.22]
                 if video_toolbar:
                     for _y, loc in video_toolbar:
                         if self._is_download_button(loc):
@@ -1749,6 +1733,10 @@ class GrokAutomationEngine:
                         if self._is_video_toolbar_noise(candidate):
                             continue
                         _push(candidate)
+                    if not results and len(video_toolbar) >= 3:
+                        _push(video_toolbar[-3][1])
+                    if not results and len(video_toolbar) >= 4:
+                        _push(video_toolbar[-4][1])
                 return results
             else:
                 # 이미지는 보통 맨 아래는 더보기, 그 위가 다운로드인 경우가 많습니다.
