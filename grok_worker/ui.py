@@ -38,6 +38,7 @@ class GrokWorkerApp:
             self.cfg["browser_attach_url"] = self.forced_attach_url
         if self.forced_worker_name:
             self.cfg["worker_name"] = self.forced_worker_name
+        self.theme = self._build_theme()
         self._suspend_auto_save = True
         self.browser = BrowserManager(self.log)
         self.queue_items: list[QueueItem] = []
@@ -51,9 +52,14 @@ class GrokWorkerApp:
 
         self.root = tk.Tk()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
-        self.root.geometry(self.forced_geometry or str(self.cfg.get("window_geometry") or "920x560"))
+        saved_geometry = str(self.cfg.get("window_geometry") or "").strip()
+        default_geometry = str(DEFAULT_CONFIG.get("window_geometry") or "920x560")
+        initial_geometry = saved_geometry or self.forced_geometry or default_geometry
+        if self.forced_geometry and (not saved_geometry or saved_geometry == default_geometry):
+            initial_geometry = self.forced_geometry
+        self.root.geometry(initial_geometry)
         self.root.minsize(820, 520)
-        self.root.configure(bg="#14161b")
+        self.root.configure(bg=self.theme["root_bg"])
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._build_vars()
@@ -89,137 +95,236 @@ class GrokWorkerApp:
         self.prompt_file_summary_var = tk.StringVar(value="")
         self.attach_url_var = tk.StringVar(value="")
 
+    def _build_theme(self) -> dict[str, str]:
+        identity = f"{self.instance_key} {self.forced_worker_name or ''} {self.cfg.get('worker_name') or ''}".lower()
+        if "worker2" in identity or identity.endswith("2"):
+            return {
+                "root_bg": "#1a1311",
+                "top_left_bg": "#3a2118",
+                "top_left_border": "#d27a49",
+                "top_mid_bg": "#4a2617",
+                "top_mid_border": "#ea9d5e",
+                "top_right_bg": "#3a2118",
+                "settings_bg": "#402217",
+                "settings_border": "#d27a49",
+                "queue_panel_bg": "#3a2118",
+                "queue_panel_border": "#d27a49",
+                "log_panel_bg": "#241513",
+                "log_text_bg": "#160e0d",
+                "log_text_fg": "#ffe2d0",
+                "muted_fg": "#f1c8b0",
+                "sub_fg": "#e7b595",
+                "chip_bg": "#5a2d1b",
+                "chip_fg": "#ffd1ae",
+                "progress_bg": "#26140f",
+                "progress_border": "#8c5435",
+                "progress_fill": "#ff9855",
+                "small_btn_bg": "#5a2d1b",
+                "open_btn_bg": "#a95727",
+                "start_btn_bg": "#cf6a2d",
+                "settings_toggle_bg": "#5a2d1b",
+                "status_fg": "#ffb37d",
+            }
+        if "worker3" in identity or identity.endswith("3"):
+            return {
+                "root_bg": "#101815",
+                "top_left_bg": "#1a2d27",
+                "top_left_border": "#49b287",
+                "top_mid_bg": "#203831",
+                "top_mid_border": "#5ec6a0",
+                "top_right_bg": "#1a2d27",
+                "settings_bg": "#193129",
+                "settings_border": "#49b287",
+                "queue_panel_bg": "#183028",
+                "queue_panel_border": "#49b287",
+                "log_panel_bg": "#121d19",
+                "log_text_bg": "#0f1512",
+                "log_text_fg": "#daf8eb",
+                "muted_fg": "#b7d8cb",
+                "sub_fg": "#a5d6c1",
+                "chip_bg": "#203a32",
+                "chip_fg": "#8ef0c5",
+                "progress_bg": "#12211d",
+                "progress_border": "#3d6c59",
+                "progress_fill": "#58d39f",
+                "small_btn_bg": "#203a32",
+                "open_btn_bg": "#2e6e5a",
+                "start_btn_bg": "#2f8a68",
+                "settings_toggle_bg": "#203a32",
+                "status_fg": "#8ef0c5",
+            }
+        return {
+            "root_bg": "#14161b",
+            "top_left_bg": "#1d2432",
+            "top_left_border": "#41608a",
+            "top_mid_bg": "#202b3e",
+            "top_mid_border": "#4c6b9a",
+            "top_right_bg": "#1d2432",
+            "settings_bg": "#1a2f4f",
+            "settings_border": "#5b84b8",
+            "queue_panel_bg": "#17283f",
+            "queue_panel_border": "#5b84b8",
+            "log_panel_bg": "#14161b",
+            "log_text_bg": "#101723",
+            "log_text_fg": "#d7e5ff",
+            "muted_fg": "#a9bdd8",
+            "sub_fg": "#c4d4ec",
+            "chip_bg": "#20304a",
+            "chip_fg": "#8fd0ff",
+            "progress_bg": "#152033",
+            "progress_border": "#314966",
+            "progress_fill": "#4ca7ff",
+            "small_btn_bg": "#233042",
+            "open_btn_bg": "#31527d",
+            "start_btn_bg": "#2f8a68",
+            "settings_toggle_bg": "#233042",
+            "status_fg": "#79e3a0",
+        }
+
+    def _bg(self, key: str) -> str:
+        return self.theme[key]
+
     def _build_ui(self) -> None:
         root = self.root
 
-        top = tk.Frame(root, bg="#14161b")
+        top = tk.Frame(root, bg=self._bg("root_bg"))
         top.pack(fill="x", padx=10, pady=(10, 6))
 
-        top_left = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
+        top_left = tk.Frame(top, bg=self._bg("top_left_bg"), highlightbackground=self._bg("top_left_border"), highlightthickness=1)
         top_left.pack(side="left", fill="both", expand=True)
-        tk.Label(top_left, text="Grok Worker", bg="#1d2432", fg="#ffffff", font=("Malgun Gothic", 13, "bold")).pack(anchor="w", padx=10, pady=(6, 1))
-        tk.Label(top_left, textvariable=self.worker_name_var, bg="#1d2432", fg="#a9bdd8", font=("Malgun Gothic", 9)).pack(anchor="w", padx=10, pady=(0, 6))
+        tk.Label(top_left, text="Grok Worker", bg=self._bg("top_left_bg"), fg="#ffffff", font=("Malgun Gothic", 13, "bold")).pack(anchor="w", padx=10, pady=(6, 1))
+        tk.Label(top_left, textvariable=self.worker_name_var, bg=self._bg("top_left_bg"), fg=self._bg("muted_fg"), font=("Malgun Gothic", 9)).pack(anchor="w", padx=10, pady=(0, 6))
 
-        top_mid = tk.Frame(top, bg="#202b3e", width=250, highlightbackground="#4c6b9a", highlightthickness=1)
+        top_mid = tk.Frame(top, bg=self._bg("top_mid_bg"), width=250, highlightbackground=self._bg("top_mid_border"), highlightthickness=1)
         top_mid.pack(side="left", padx=8, fill="y")
-        tk.Label(top_mid, text="진행 상황", bg="#202b3e", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(pady=(6, 1))
-        tk.Label(top_mid, textvariable=self.project_summary_var, bg="#202b3e", fg="#c4d4ec", font=("Malgun Gothic", 8)).pack()
-        tk.Label(top_mid, textvariable=self.progress_var, bg="#202b3e", fg="#80c6ff", font=("Consolas", 12, "bold")).pack(pady=(2, 3))
-        self.progress_canvas = tk.Canvas(top_mid, width=230, height=14, bg="#152033", highlightthickness=1, highlightbackground="#314966")
+        tk.Label(top_mid, text="진행 상황", bg=self._bg("top_mid_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(pady=(6, 1))
+        tk.Label(top_mid, textvariable=self.project_summary_var, bg=self._bg("top_mid_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 8)).pack()
+        tk.Label(top_mid, textvariable=self.progress_var, bg=self._bg("top_mid_bg"), fg=self._bg("chip_fg"), font=("Consolas", 12, "bold")).pack(pady=(2, 3))
+        self.progress_canvas = tk.Canvas(top_mid, width=230, height=14, bg=self._bg("progress_bg"), highlightthickness=1, highlightbackground=self._bg("progress_border"))
         self.progress_canvas.pack(padx=10, pady=(0, 6))
-        self.progress_fill = self.progress_canvas.create_rectangle(0, 0, 0, 18, fill="#4ca7ff", outline="")
+        self.progress_fill = self.progress_canvas.create_rectangle(0, 0, 0, 18, fill=self._bg("progress_fill"), outline="")
 
-        top_right = tk.Frame(top, bg="#1d2432", highlightbackground="#41608a", highlightthickness=1)
+        top_right = tk.Frame(top, bg=self._bg("top_right_bg"), highlightbackground=self._bg("top_left_border"), highlightthickness=1)
         top_right.pack(side="left", fill="both", expand=True)
-        tk.Label(top_right, text="현재 상태", bg="#1d2432", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="e", padx=10, pady=(6, 1))
-        tk.Label(top_right, textvariable=self.status_var, bg="#1d2432", fg="#79e3a0", font=("Malgun Gothic", 10, "bold"), wraplength=180, justify="right").pack(anchor="e", padx=10, pady=(0, 6))
+        tk.Label(top_right, text="현재 상태", bg=self._bg("top_right_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="e", padx=10, pady=(6, 1))
+        tk.Label(top_right, textvariable=self.status_var, bg=self._bg("top_right_bg"), fg=self._bg("status_fg"), font=("Malgun Gothic", 10, "bold"), wraplength=180, justify="right").pack(anchor="e", padx=10, pady=(0, 6))
 
-        action_row = tk.Frame(root, bg="#14161b")
+        action_row = tk.Frame(root, bg=self._bg("root_bg"))
         action_row.pack(fill="x", padx=10, pady=(0, 6))
-        action_left = tk.Frame(action_row, bg="#14161b")
+        action_left = tk.Frame(action_row, bg=self._bg("root_bg"))
         action_left.pack(side="left")
-        action_right = tk.Frame(action_row, bg="#14161b")
+        action_right = tk.Frame(action_row, bg=self._bg("root_bg"))
         action_right.pack(side="right")
 
-        self._action_button(action_left, "완전정지", self.stop_all, "#233042", small=True).pack(side="left", padx=(0, 6))
-        self._action_button(action_left, "일시정지", self.pause_run, "#233042", small=True).pack(side="left", padx=6)
-        self._action_button(action_left, "재개", self.resume_run, "#233042", small=True).pack(side="left", padx=6)
-        self.settings_toggle_btn = self._action_button(action_left, "⚙ 설정 접기", self.toggle_settings_panel, "#233042", small=True)
+        self._action_button(action_left, "완전정지", self.stop_all, self._bg("small_btn_bg"), small=True).pack(side="left", padx=(0, 6))
+        self._action_button(action_left, "일시정지", self.pause_run, self._bg("small_btn_bg"), small=True).pack(side="left", padx=6)
+        self._action_button(action_left, "재개", self.resume_run, self._bg("small_btn_bg"), small=True).pack(side="left", padx=6)
+        self.settings_toggle_btn = self._action_button(action_left, "⚙ 설정 접기", self.toggle_settings_panel, self._bg("settings_toggle_bg"), small=True)
         self.settings_toggle_btn.pack(side="left", padx=6)
-        self._action_button(action_right, "작업봇 창 열기", self.open_browser_window, "#31527d").pack(side="left", padx=(0, 6))
-        self._action_button(action_right, "▶ 시작", self.start_run, "#2f8a68").pack(side="left")
+        self._action_button(action_right, "작업봇 창 열기", self.open_browser_window, self._bg("open_btn_bg")).pack(side="left", padx=(0, 6))
+        self._action_button(action_right, "▶ 시작", self.start_run, self._bg("start_btn_bg")).pack(side="left")
 
-        body = tk.Frame(root, bg="#14161b")
+        body = tk.Frame(root, bg=self._bg("root_bg"))
         body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        settings = tk.Frame(body, bg="#1a2f4f", highlightbackground="#5b84b8", highlightthickness=1)
+        settings = tk.Frame(body, bg=self._bg("settings_bg"), highlightbackground=self._bg("settings_border"), highlightthickness=1)
         self.settings_frame = settings
 
         settings.pack(fill="x")
         settings.grid_columnconfigure(0, weight=6)
         settings.grid_columnconfigure(1, weight=4)
 
-        left = tk.Frame(settings, bg="#1a2f4f")
+        left = tk.Frame(settings, bg=self._bg("settings_bg"))
         left.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=8)
-        right = tk.Frame(settings, bg="#1a2f4f")
+        right = tk.Frame(settings, bg=self._bg("settings_bg"))
         right.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=8)
 
         self._build_basic_settings(left)
         self._build_number_settings(right)
 
-        lower = tk.Frame(body, bg="#14161b")
+        lower = tk.Frame(body, bg=self._bg("root_bg"))
         self.lower_frame = lower
         lower.pack(fill="both", expand=True, pady=(8, 0))
-        lower.grid_columnconfigure(0, weight=1)
-        lower.grid_columnconfigure(1, weight=1)
-        lower.grid_rowconfigure(0, weight=1)
+        self.lower_pane = tk.PanedWindow(
+            lower,
+            orient=tk.HORIZONTAL,
+            sashwidth=8,
+            showhandle=False,
+            bg=self._bg("root_bg"),
+            bd=0,
+            relief="flat",
+        )
+        self.lower_pane.pack(fill="both", expand=True)
 
-        queue_wrap = tk.Frame(lower, bg="#17283f", highlightbackground="#5b84b8", highlightthickness=1)
+        queue_wrap = tk.Frame(self.lower_pane, bg=self._bg("queue_panel_bg"), highlightbackground=self._bg("queue_panel_border"), highlightthickness=1)
         self.queue_wrap = queue_wrap
-        queue_wrap.grid(row=0, column=0, sticky="nsew")
 
-        queue_header = tk.Frame(queue_wrap, bg="#17283f")
+        queue_header = tk.Frame(queue_wrap, bg=self._bg("queue_panel_bg"))
         queue_header.pack(fill="x", padx=8, pady=(8, 4))
-        tk.Label(queue_header, text="대기열", bg="#17283f", fg="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="left")
-        self._action_button(queue_header, "실패 번호 복붙", self.copy_failed_numbers, "#31527d", small=True).pack(side="right", padx=(8, 0))
-        self._action_button(queue_header, "지우기", self.clear_queue, "#31527d", small=True).pack(side="right")
-        tk.Label(queue_header, textvariable=self.queue_summary_var, bg="#17283f", fg="#c4d4ec", font=("Malgun Gothic", 8)).pack(side="right", padx=(10, 12))
+        tk.Label(queue_header, text="대기열", bg=self._bg("queue_panel_bg"), fg="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="left")
+        self._action_button(queue_header, "실패 번호 복붙", self.copy_failed_numbers, self._bg("open_btn_bg"), small=True).pack(side="right", padx=(8, 0))
+        self._action_button(queue_header, "지우기", self.clear_queue, self._bg("open_btn_bg"), small=True).pack(side="right")
+        tk.Label(queue_header, textvariable=self.queue_summary_var, bg=self._bg("queue_panel_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 8)).pack(side="right", padx=(10, 12))
 
-        queue_body = tk.Frame(queue_wrap, bg="#17283f")
+        queue_body = tk.Frame(queue_wrap, bg=self._bg("queue_panel_bg"))
         queue_body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self.queue_canvas = tk.Canvas(queue_body, bg="#17283f", highlightthickness=0)
+        self.queue_canvas = tk.Canvas(queue_body, bg=self._bg("queue_panel_bg"), highlightthickness=0)
         self.queue_scroll = tk.Scrollbar(queue_body, orient="vertical", command=self.queue_canvas.yview)
         self.queue_canvas.configure(yscrollcommand=self.queue_scroll.set)
         self.queue_scroll.pack(side="right", fill="y")
         self.queue_canvas.pack(side="left", fill="both", expand=True)
-        self.queue_inner = tk.Frame(self.queue_canvas, bg="#17283f")
+        self.queue_inner = tk.Frame(self.queue_canvas, bg=self._bg("queue_panel_bg"))
         self.queue_window = self.queue_canvas.create_window((0, 0), window=self.queue_inner, anchor="nw")
         self.queue_inner.bind("<Configure>", lambda _e: self._update_queue_scroll())
         self.queue_canvas.bind("<Configure>", self._on_queue_canvas_resize)
         self.queue_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
-        log_frame = tk.Frame(lower, bg="#14161b", highlightbackground="#5b84b8", highlightthickness=1)
+        log_frame = tk.Frame(self.lower_pane, bg=self._bg("log_panel_bg"), highlightbackground=self._bg("queue_panel_border"), highlightthickness=1)
         self.log_frame = log_frame
-        log_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        tk.Label(log_frame, text="로그", bg="#14161b", fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
-        self.log_text = tk.Text(log_frame, height=6, bg="#101723", fg="#d7e5ff", insertbackground="#ffffff", relief="solid", borderwidth=1)
+        tk.Label(log_frame, text="로그", bg=self._bg("log_panel_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+        self.log_text = tk.Text(log_frame, height=6, bg=self._bg("log_text_bg"), fg=self._bg("log_text_fg"), insertbackground="#ffffff", relief="solid", borderwidth=1)
         self.log_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.log_text.configure(state="disabled")
 
+        self.lower_pane.add(queue_wrap, minsize=300)
+        self.lower_pane.add(log_frame, minsize=260)
+        self.lower_pane.bind("<ButtonRelease-1>", self._on_lower_pane_released)
+        self.root.after(120, self._restore_lower_pane_sash)
+
     def _build_basic_settings(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="기본 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
+        tk.Label(parent, text="기본 설정", bg=self._bg("settings_bg"), fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
 
         self._labeled_combo(parent, "프롬프트 파일", self.prompt_slot_var, self.prompt_slot_changed)
-        prompt_btns = tk.Frame(parent, bg="#1a2f4f")
+        prompt_btns = tk.Frame(parent, bg=self._bg("settings_bg"))
         prompt_btns.pack(fill="x", padx=4, pady=(0, 4))
         for col in range(4):
             prompt_btns.grid_columnconfigure(col, weight=1)
-        self._action_button(prompt_btns, "파일 열기", self.open_prompt_file, "#31527d", small=True, width=8).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, "#31527d", small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
-        self._action_button(prompt_btns, "삭제", self.delete_prompt_file, "#31527d", small=True, width=8).grid(row=0, column=2, sticky="ew", padx=6)
-        self._action_button(prompt_btns, "추가", self.add_prompt_file, "#31527d", small=True, width=6).grid(row=0, column=3, sticky="ew", padx=(6, 0))
-        tk.Label(parent, textvariable=self.prompt_file_summary_var, bg="#1a2f4f", fg="#c8d7eb", font=("Malgun Gothic", 9)).pack(anchor="w", padx=4, pady=(0, 8))
+        self._action_button(prompt_btns, "파일 열기", self.open_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
+        self._action_button(prompt_btns, "삭제", self.delete_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=2, sticky="ew", padx=6)
+        self._action_button(prompt_btns, "추가", self.add_prompt_file, self._bg("open_btn_bg"), small=True, width=6).grid(row=0, column=3, sticky="ew", padx=(6, 0))
+        tk.Label(parent, textvariable=self.prompt_file_summary_var, bg=self._bg("settings_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 9)).pack(anchor="w", padx=4, pady=(0, 8))
 
         self._path_row(parent, "저장 폴더", self.download_dir_var, self.choose_download_dir)
-        attach_note = tk.Frame(parent, bg="#1a2f4f")
+        attach_note = tk.Frame(parent, bg=self._bg("settings_bg"))
         attach_note.pack(fill="x", padx=4, pady=(0, 8))
-        tk.Label(attach_note, text="브라우저 연결", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
+        tk.Label(attach_note, text="브라우저 연결", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         tk.Label(
             attach_note,
             textvariable=self.attach_url_var,
-            bg="#20304a",
-            fg="#8fd0ff",
+            bg=self._bg("chip_bg"),
+            fg=self._bg("chip_fg"),
             font=("Consolas", 10, "bold"),
             padx=10,
             pady=5,
         ).pack(anchor="w", pady=(6, 0))
 
     def _build_number_settings(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="번호 설정", bg="#1a2f4f", fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
+        tk.Label(parent, text="번호 설정", bg=self._bg("settings_bg"), fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
 
-        media_mode_row = tk.Frame(parent, bg="#1a2f4f")
+        media_mode_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         media_mode_row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(media_mode_row, text="작업 모드", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(media_mode_row, text="작업 모드", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         for text, value in (("이미지", "image"), ("비디오", "video")):
             tk.Radiobutton(
                 media_mode_row,
@@ -227,18 +332,18 @@ class GrokWorkerApp:
                 value=value,
                 variable=self.media_mode_var,
                 command=self.on_media_mode_changed,
-                bg="#1a2f4f",
+                bg=self._bg("settings_bg"),
                 fg="#ffffff",
-                selectcolor="#21314f",
-                activebackground="#1a2f4f",
+                selectcolor=self._bg("chip_bg"),
+                activebackground=self._bg("settings_bg"),
                 activeforeground="#ffffff",
                 font=("Malgun Gothic", 10),
             ).pack(side="left", padx=(12, 12))
 
-        self.video_settings_frame = tk.Frame(parent, bg="#1a2f4f")
-        video_row_1 = tk.Frame(self.video_settings_frame, bg="#1a2f4f")
+        self.video_settings_frame = tk.Frame(parent, bg=self._bg("settings_bg"))
+        video_row_1 = tk.Frame(self.video_settings_frame, bg=self._bg("settings_bg"))
         video_row_1.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(video_row_1, text="비디오 품질", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(video_row_1, text="비디오 품질", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         for text, value in (("480p", "480p"), ("720p", "720p")):
             tk.Radiobutton(
                 video_row_1,
@@ -246,17 +351,17 @@ class GrokWorkerApp:
                 value=value,
                 variable=self.video_quality_var,
                 command=lambda: self.auto_save("비디오 품질 변경"),
-                bg="#1a2f4f",
+                bg=self._bg("settings_bg"),
                 fg="#ffffff",
-                selectcolor="#21314f",
-                activebackground="#1a2f4f",
+                selectcolor=self._bg("chip_bg"),
+                activebackground=self._bg("settings_bg"),
                 activeforeground="#ffffff",
                 font=("Malgun Gothic", 10),
             ).pack(side="left", padx=(12, 10))
 
-        video_row_2 = tk.Frame(self.video_settings_frame, bg="#1a2f4f")
+        video_row_2 = tk.Frame(self.video_settings_frame, bg=self._bg("settings_bg"))
         video_row_2.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(video_row_2, text="길이", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(video_row_2, text="길이", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         for text, value in (("6초", "6s"), ("10초", "10s")):
             tk.Radiobutton(
                 video_row_2,
@@ -264,32 +369,32 @@ class GrokWorkerApp:
                 value=value,
                 variable=self.video_duration_var,
                 command=lambda: self.auto_save("비디오 길이 변경"),
-                bg="#1a2f4f",
+                bg=self._bg("settings_bg"),
                 fg="#ffffff",
-                selectcolor="#21314f",
-                activebackground="#1a2f4f",
+                selectcolor=self._bg("chip_bg"),
+                activebackground=self._bg("settings_bg"),
                 activeforeground="#ffffff",
                 font=("Malgun Gothic", 10),
             ).pack(side="left", padx=(12, 10))
 
-        aspect_row = tk.Frame(parent, bg="#1a2f4f")
+        aspect_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         aspect_row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(aspect_row, text="비율", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(aspect_row, text="비율", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         tk.Radiobutton(
             aspect_row,
             text="16:9",
             value="16:9",
             variable=self.aspect_ratio_var,
             command=lambda: self.auto_save("비율 변경"),
-            bg="#1a2f4f",
+            bg=self._bg("settings_bg"),
             fg="#ffffff",
-            selectcolor="#21314f",
-            activebackground="#1a2f4f",
+            selectcolor=self._bg("chip_bg"),
+            activebackground=self._bg("settings_bg"),
             activeforeground="#ffffff",
             font=("Malgun Gothic", 10),
         ).pack(side="left", padx=(12, 10))
 
-        mode_row = tk.Frame(parent, bg="#1a2f4f")
+        mode_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         mode_row.pack(fill="x", padx=4, pady=(0, 6))
         for text, value in (("연속", "range"), ("개별", "manual")):
             tk.Radiobutton(
@@ -298,35 +403,35 @@ class GrokWorkerApp:
                 value=value,
                 variable=self.number_mode_var,
                 command=self.on_number_mode_changed,
-                bg="#1a2f4f",
+                bg=self._bg("settings_bg"),
                 fg="#ffffff",
-                selectcolor="#21314f",
-                activebackground="#1a2f4f",
+                selectcolor=self._bg("chip_bg"),
+                activebackground=self._bg("settings_bg"),
                 activeforeground="#ffffff",
                 font=("Malgun Gothic", 10),
             ).pack(side="left", padx=(0, 18))
 
-        range_row = tk.Frame(parent, bg="#1a2f4f")
+        range_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         range_row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(range_row, text="연속 범위", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(range_row, text="연속 범위", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.start_entry = tk.Entry(range_row, textvariable=self.start_number_var, width=8, font=("Consolas", 12))
         self.start_entry.pack(side="left", padx=(12, 6))
         self._bind_entry_autosave(self.start_entry, "번호 범위 변경")
-        tk.Label(range_row, text="~", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(range_row, text="~", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.end_entry = tk.Entry(range_row, textvariable=self.end_number_var, width=8, font=("Consolas", 12))
         self.end_entry.pack(side="left", padx=(6, 0))
         self._bind_entry_autosave(self.end_entry, "번호 범위 변경")
 
-        manual_row = tk.Frame(parent, bg="#1a2f4f")
+        manual_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         manual_row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(manual_row, text="개별 번호", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
+        tk.Label(manual_row, text="개별 번호", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         self.manual_entry = tk.Entry(manual_row, textvariable=self.manual_numbers_var, font=("Consolas", 12))
         self.manual_entry.pack(fill="x", pady=(6, 0))
         self._bind_entry_autosave(self.manual_entry, "개별 번호 변경")
 
-        speed_row = tk.Frame(parent, bg="#1a2f4f")
+        speed_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         speed_row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(speed_row, text="타이핑 속도", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
+        tk.Label(speed_row, text="타이핑 속도", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         self.speed_scale = tk.Scale(
             speed_row,
             from_=0.5,
@@ -334,48 +439,48 @@ class GrokWorkerApp:
             resolution=0.1,
             orient="horizontal",
             variable=self.typing_speed_var,
-            bg="#1a2f4f",
+            bg=self._bg("settings_bg"),
             fg="#ffffff",
-            troughcolor="#23354f",
+            troughcolor=self._bg("chip_bg"),
             highlightthickness=0,
             command=lambda _v: self.auto_save("타이핑 속도 변경"),
         )
         self.speed_scale.pack(fill="x")
 
-        humanize_row = tk.Frame(parent, bg="#1a2f4f")
+        humanize_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         humanize_row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(humanize_row, text="인간처럼 입력", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
-        tk.Label(humanize_row, text="항상 ON", bg="#20304a", fg="#8df0bd", font=("Malgun Gothic", 10, "bold"), padx=10, pady=3).pack(side="left", padx=(10, 0))
+        tk.Label(humanize_row, text="인간처럼 입력", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(humanize_row, text="항상 ON", bg=self._bg("chip_bg"), fg=self._bg("status_fg"), font=("Malgun Gothic", 10, "bold"), padx=10, pady=3).pack(side="left", padx=(10, 0))
 
-        wait_row_1 = tk.Frame(parent, bg="#1a2f4f")
+        wait_row_1 = tk.Frame(parent, bg=self._bg("settings_bg"))
         wait_row_1.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(wait_row_1, text="생성 후 다운로드 대기(초)", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(wait_row_1, text="생성 후 다운로드 대기(초)", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.generate_wait_entry = tk.Entry(wait_row_1, textvariable=self.generate_wait_var, width=8, font=("Consolas", 11))
         self.generate_wait_entry.pack(side="left", padx=(12, 0))
         self._bind_entry_autosave(self.generate_wait_entry, "생성 대기시간 변경")
 
-        wait_row_2 = tk.Frame(parent, bg="#1a2f4f")
+        wait_row_2 = tk.Frame(parent, bg=self._bg("settings_bg"))
         wait_row_2.pack(fill="x", padx=4, pady=(0, 4))
-        tk.Label(wait_row_2, text="다운로드 후 다음 작업 대기(초)", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(wait_row_2, text="다운로드 후 다음 작업 대기(초)", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.next_prompt_wait_entry = tk.Entry(wait_row_2, textvariable=self.next_prompt_wait_var, width=8, font=("Consolas", 11))
         self.next_prompt_wait_entry.pack(side="left", padx=(12, 0))
         self._bind_entry_autosave(self.next_prompt_wait_entry, "다음 작업 대기시간 변경")
 
-        break_row = tk.Frame(parent, bg="#1a2f4f")
+        break_row = tk.Frame(parent, bg=self._bg("settings_bg"))
         break_row.pack(fill="x", padx=4, pady=(6, 0))
-        tk.Label(break_row, text="몇 개마다 휴식", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(break_row, text="몇 개마다 휴식", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.break_every_entry = tk.Entry(break_row, textvariable=self.break_every_var, width=6, font=("Consolas", 11))
         self.break_every_entry.pack(side="left", padx=(10, 12))
         self._bind_entry_autosave(self.break_every_entry, "휴식 간격 변경")
-        tk.Label(break_row, text="휴식 시간(분)", bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(break_row, text="휴식 시간(분)", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
         self.break_minutes_entry = tk.Entry(break_row, textvariable=self.break_minutes_var, width=6, font=("Consolas", 11))
         self.break_minutes_entry.pack(side="left", padx=(10, 0))
         self._bind_entry_autosave(self.break_minutes_entry, "휴식 시간 변경")
 
     def _labeled_combo(self, parent: tk.Frame, label: str, variable: tk.StringVar, callback) -> None:
-        row = tk.Frame(parent, bg="#1a2f4f")
+        row = tk.Frame(parent, bg=self._bg("settings_bg"))
         row.pack(fill="x", padx=4, pady=(0, 6))
-        tk.Label(row, text=label, bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
+        tk.Label(row, text=label, bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
         combo = tk.OptionMenu(row, variable, "")
         combo.configure(font=("Malgun Gothic", 10), bg="#f0ede4", width=38, highlightthickness=0)
         combo.pack(fill="x", pady=(6, 0))
@@ -383,15 +488,15 @@ class GrokWorkerApp:
         self.prompt_menu = combo
 
     def _path_row(self, parent: tk.Frame, label: str, variable: tk.StringVar, command) -> None:
-        row = tk.Frame(parent, bg="#1a2f4f")
+        row = tk.Frame(parent, bg=self._bg("settings_bg"))
         row.pack(fill="x", padx=4, pady=(0, 8))
-        tk.Label(row, text=label, bg="#1a2f4f", fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
-        input_row = tk.Frame(row, bg="#1a2f4f")
+        tk.Label(row, text=label, bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
+        input_row = tk.Frame(row, bg=self._bg("settings_bg"))
         input_row.pack(fill="x", pady=(6, 0))
         entry = tk.Entry(input_row, textvariable=variable, font=("Consolas", 10))
         entry.pack(side="left", fill="x", expand=True)
         self._bind_entry_autosave(entry, f"{label} 변경")
-        self._action_button(input_row, "선택", command, "#31527d", small=True).pack(side="left", padx=(8, 0))
+        self._action_button(input_row, "선택", command, self._bg("open_btn_bg"), small=True).pack(side="left", padx=(8, 0))
 
     def _bind_entry_autosave(self, widget, reason: str) -> None:
         widget.bind("<FocusOut>", lambda _e, r=reason: self.auto_save(r))
@@ -459,6 +564,7 @@ class GrokWorkerApp:
         self.cfg["break_every_count"] = self._nonnegative_int_or_default(self.break_every_var.get(), 0)
         self.cfg["break_minutes"] = self._float_or_default(self.break_minutes_var.get(), 0.0)
         self.cfg["window_geometry"] = self.root.geometry()
+        self.cfg["lower_pane_sash"] = self._current_lower_pane_sash()
         self.cfg["settings_collapsed"] = bool(self.settings_collapsed)
 
         slot_name = self.prompt_slot_var.get().strip()
@@ -795,6 +901,27 @@ class GrokWorkerApp:
             self.queue_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         except Exception:
             pass
+
+    def _current_lower_pane_sash(self) -> int:
+        try:
+            return max(280, int(self.lower_pane.sash_coord(0)[0]))
+        except Exception:
+            return int(self.cfg.get("lower_pane_sash", 460) or 460)
+
+    def _restore_lower_pane_sash(self) -> None:
+        try:
+            self.lower_pane.update_idletasks()
+            total_width = max(640, int(self.lower_pane.winfo_width()))
+            saved = int(self.cfg.get("lower_pane_sash", 460) or 460)
+            target = min(total_width - 260, max(300, saved))
+            self.lower_pane.sash_place(0, target, 1)
+        except Exception:
+            pass
+
+    def _on_lower_pane_released(self, _event=None) -> None:
+        if self._suspend_auto_save:
+            return
+        self.auto_save("대기열/로그 너비 변경")
 
     def log(self, message: str) -> None:
         line = str(message or "").strip()

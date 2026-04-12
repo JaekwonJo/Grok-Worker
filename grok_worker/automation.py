@@ -103,49 +103,65 @@ class GrokAutomationEngine:
                         return
                     wait_if_paused()
                     update_queue(item.number, "running", f"{item.tag} 실행 중", "")
-                    set_status(f"{item.tag} {('비디오' if media_mode == 'video' else '이미지')} 옵션 맞추는 중")
-                    self._apply_generation_settings(page, item.tag, log, set_status)
-                    set_status(f"{item.tag} 입력 중 ({idx}/{total})")
-                    log(f"✍️ 프롬프트 입력 시작: {item.tag}")
-                    try:
-                        self._run_single_item(
-                            page=page,
-                            item=item,
-                            typing_delay_ms=typing_delay_ms,
-                            log=log,
-                            set_status=set_status,
-                            should_stop=should_stop,
-                            wait_if_paused=wait_if_paused,
-                        )
-                        image_path = self._download_latest_result(
-                            page=page,
-                            item=item,
-                            download_dir=download_dir,
-                            timeout_seconds=generate_wait_seconds,
-                            log=log,
-                            set_status=set_status,
-                            should_stop=should_stop,
-                            wait_if_paused=wait_if_paused,
-                        )
-                        update_queue(item.number, "success", f"저장: {image_path.name}", image_path.name)
-                        set_status(f"{item.tag} 완료")
-                        log(f"✅ 저장 완료: {image_path.name}")
-                        self._wait_after_download(
-                            seconds=next_prompt_wait_seconds,
-                            log=log,
-                            set_status=set_status,
-                            item_tag=item.tag,
-                            should_stop=should_stop,
-                            wait_if_paused=wait_if_paused,
-                        )
-                        set_status(f"{item.tag} 처음 화면 복귀 중")
-                        self._reset_for_next_prompt(page, log)
-                    except Exception as exc:
-                        update_queue(item.number, "failed", str(exc), "")
-                        set_status(f"{item.tag} 실패")
-                        log(f"❌ {item.tag} 실패: {exc}")
-                        self._save_debug_screenshot(page, item.tag, log)
-                        self._safe_recover(page, log)
+                    completed = False
+                    max_attempts = 2
+                    for attempt in range(1, max_attempts + 1):
+                        if attempt > 1:
+                            update_queue(item.number, "running", f"{item.tag} 재시도 {attempt - 1}/1", "")
+                            log(f"🔁 {item.tag} 재시도 {attempt - 1}/1 시작")
+                        set_status(f"{item.tag} {('비디오' if media_mode == 'video' else '이미지')} 옵션 맞추는 중")
+                        self._apply_generation_settings(page, item.tag, log, set_status)
+                        set_status(f"{item.tag} 입력 중 ({idx}/{total})")
+                        log(f"✍️ 프롬프트 입력 시작: {item.tag}")
+                        try:
+                            self._run_single_item(
+                                page=page,
+                                item=item,
+                                typing_delay_ms=typing_delay_ms,
+                                log=log,
+                                set_status=set_status,
+                                should_stop=should_stop,
+                                wait_if_paused=wait_if_paused,
+                            )
+                            image_path = self._download_latest_result(
+                                page=page,
+                                item=item,
+                                download_dir=download_dir,
+                                timeout_seconds=generate_wait_seconds,
+                                log=log,
+                                set_status=set_status,
+                                should_stop=should_stop,
+                                wait_if_paused=wait_if_paused,
+                            )
+                            update_queue(item.number, "success", f"저장: {image_path.name}", image_path.name)
+                            set_status(f"{item.tag} 완료")
+                            log(f"✅ 저장 완료: {image_path.name}")
+                            self._wait_after_download(
+                                seconds=next_prompt_wait_seconds,
+                                log=log,
+                                set_status=set_status,
+                                item_tag=item.tag,
+                                should_stop=should_stop,
+                                wait_if_paused=wait_if_paused,
+                            )
+                            set_status(f"{item.tag} 처음 화면 복귀 중")
+                            self._reset_for_next_prompt(page, log)
+                            completed = True
+                            break
+                        except Exception as exc:
+                            self._save_debug_screenshot(page, item.tag, log)
+                            if attempt < max_attempts and not should_stop():
+                                log(f"⚠️ {item.tag} 실패, 1회 재시도합니다: {exc}")
+                                set_status(f"{item.tag} 재시도 준비")
+                                self._safe_recover(page, log)
+                                continue
+                            update_queue(item.number, "failed", str(exc), "")
+                            set_status(f"{item.tag} 실패")
+                            log(f"❌ {item.tag} 실패: {exc}")
+                            self._safe_recover(page, log)
+                    if not completed and should_stop():
+                        set_status("중지됨")
+                        return
                     if (
                         idx < total
                         and break_every_count > 0
@@ -374,11 +390,16 @@ class GrokAutomationEngine:
         targets.append(("비율", self._aspect_ratio()))
         for label, target in targets:
             set_status(f"{item_tag} {label} 설정 중")
-            if self._click_generation_option(page, target):
+            if label == "비율":
+                success = self._set_aspect_ratio(page, target)
+            else:
+                success = self._click_generation_option(page, target)
+            if success:
                 log(f"🎚️ {label} 설정: {target}")
             else:
                 log(f"⚠️ {label} 설정 버튼을 못 찾아 그대로 진행: {target}")
             time.sleep(0.12)
+        self._dismiss_generation_overlay(page)
 
     def _click_generation_option(self, page, label: str) -> bool:
         input_loc = self._find_prompt_input(page)
@@ -427,6 +448,106 @@ class GrokAutomationEngine:
         if best is None:
             return False
         best.click(timeout=4000)
+        return True
+
+    def _dismiss_generation_overlay(self, page) -> None:
+        for _ in range(2):
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            time.sleep(0.08)
+
+    def _set_aspect_ratio(self, page, target: str) -> bool:
+        target = str(target or "").strip()
+        input_loc = self._find_prompt_input(page)
+        input_box = None
+        if input_loc is not None:
+            try:
+                input_box = input_loc.bounding_box()
+            except Exception:
+                input_box = None
+
+        trigger = None
+        best_score = -1.0
+        ratio_tokens = {"2:3", "3:2", "1:1", "9:16", "16:9"}
+        for selector in ("button", "[role='button']", "div"):
+            try:
+                count = min(page.locator(selector).count(), 140)
+            except Exception:
+                continue
+            for idx in range(count):
+                try:
+                    loc = page.locator(selector).nth(idx)
+                    if not loc.is_visible():
+                        continue
+                    box = loc.bounding_box()
+                    if not box:
+                        continue
+                    text = (loc.inner_text(timeout=80) or "").strip()
+                    aria = (loc.get_attribute("aria-label") or "").strip()
+                    blob = f"{text} {aria}"
+                    if not any(token in blob for token in ratio_tokens):
+                        continue
+                    score = 0.0
+                    if input_box:
+                        if box["y"] < (input_box["y"] - 80):
+                            continue
+                        score += 1800 - abs((box["y"] + box["height"] / 2.0) - (input_box["y"] + input_box["height"] / 2.0))
+                        score += 600 - min(600, abs(box["x"] - input_box["x"]))
+                    if target in blob:
+                        score += 2000
+                    if 24 <= box["height"] <= 56:
+                        score += 120
+                    if score > best_score:
+                        best_score = score
+                        trigger = loc
+                except Exception:
+                    continue
+
+        if trigger is None:
+            return False
+
+        try:
+            current_text = (trigger.inner_text(timeout=80) or "").strip()
+        except Exception:
+            current_text = ""
+        try:
+            current_aria = (trigger.get_attribute("aria-label") or "").strip()
+        except Exception:
+            current_aria = ""
+        current_blob = f"{current_text} {current_aria}"
+        if target in current_blob:
+            return True
+
+        trigger.click(timeout=4000)
+        time.sleep(0.2)
+
+        option = None
+        for selector in ("button", "[role='option']", "[role='button']", "div", "span"):
+            try:
+                count = min(page.locator(selector).count(), 160)
+            except Exception:
+                continue
+            for idx in range(count):
+                try:
+                    loc = page.locator(selector).nth(idx)
+                    if not loc.is_visible():
+                        continue
+                    text = (loc.inner_text(timeout=80) or "").strip()
+                    aria = (loc.get_attribute("aria-label") or "").strip()
+                    if text == target or aria == target:
+                        option = loc
+                        break
+                except Exception:
+                    continue
+            if option is not None:
+                break
+
+        if option is None:
+            return False
+        option.click(timeout=4000)
+        time.sleep(0.15)
         return True
 
     def _find_prompt_input(self, page):
@@ -588,8 +709,9 @@ class GrokAutomationEngine:
         input_loc = self._find_prompt_input(page)
         submit = self._find_submit_button(page, input_loc)
         if submit is None:
-            raise RuntimeError("전송 화살표 버튼을 찾지 못했습니다.")
-        log(f"🧭 제출 버튼 후보: {self._describe_locator(submit)}")
+            log("⚠️ 전송 버튼 미탐: Enter 제출 폴백으로 진행합니다.")
+        else:
+            log(f"🧭 제출 버튼 후보: {self._describe_locator(submit)}")
         set_status(f"{item.tag} 제출 시도")
         self._submit_prompt(page=page, input_loc=input_loc, submit=submit, log=log)
         log("📨 전송 완료")
@@ -652,12 +774,17 @@ class GrokAutomationEngine:
 
     def _submit_prompt(self, *, page, input_loc, submit, log: LogFn) -> None:
         before_text = self._read_prompt_input_text(input_loc)
-        for attempt, mode in enumerate(("click", "force", "enter"), start=1):
+        modes = ("click", "force", "enter") if submit is not None else ("enter", "ctrl_enter")
+        for attempt, mode in enumerate(modes, start=1):
             try:
                 if mode == "click":
                     submit.click(timeout=3000)
                 elif mode == "force":
                     submit.click(timeout=3000, force=True)
+                elif mode == "ctrl_enter":
+                    input_loc.click(timeout=3000)
+                    time.sleep(0.1)
+                    page.keyboard.press("Control+Enter")
                 else:
                     input_loc.click(timeout=3000)
                     time.sleep(0.1)
@@ -696,31 +823,32 @@ class GrokAutomationEngine:
             current_len = len(current_text.strip())
             if before_len > 0 and current_len <= max(2, int(before_len * 0.3)):
                 return True
-            try:
-                aria = (submit.get_attribute("aria-label") or "").strip().lower()
-            except Exception:
-                aria = ""
-            try:
-                text = (submit.inner_text(timeout=100) or "").strip().lower()
-            except Exception:
-                text = ""
-            if any(token in aria for token in ("stop", "cancel", "중지", "정지")):
-                return True
-            if any(token in text for token in ("stop", "cancel", "중지", "정지")):
-                return True
-            try:
-                disabled = (submit.get_attribute("disabled") or "").strip().lower()
-                aria_disabled = (submit.get_attribute("aria-disabled") or "").strip().lower()
-            except Exception:
-                disabled = ""
-                aria_disabled = ""
-            if disabled in {"true", "disabled"} or aria_disabled == "true":
-                return True
-            try:
-                if not submit.is_visible():
+            if submit is not None:
+                try:
+                    aria = (submit.get_attribute("aria-label") or "").strip().lower()
+                except Exception:
+                    aria = ""
+                try:
+                    text = (submit.inner_text(timeout=100) or "").strip().lower()
+                except Exception:
+                    text = ""
+                if any(token in aria for token in ("stop", "cancel", "중지", "정지")):
                     return True
-            except Exception:
-                return True
+                if any(token in text for token in ("stop", "cancel", "중지", "정지")):
+                    return True
+                try:
+                    disabled = (submit.get_attribute("disabled") or "").strip().lower()
+                    aria_disabled = (submit.get_attribute("aria-disabled") or "").strip().lower()
+                except Exception:
+                    disabled = ""
+                    aria_disabled = ""
+                if disabled in {"true", "disabled"} or aria_disabled == "true":
+                    return True
+                try:
+                    if not submit.is_visible():
+                        return True
+                except Exception:
+                    return True
             time.sleep(0.15)
         return False
 
@@ -1062,9 +1190,9 @@ class GrokAutomationEngine:
                 input_box = None
         best = None
         best_score = -1.0
-        for selector in ("button", "[role='button']"):
+        for selector in ("button", "[role='button']", "div", "span"):
             try:
-                count = min(page.locator(selector).count(), 60)
+                count = min(page.locator(selector).count(), 140)
             except Exception:
                 continue
             for idx in range(count):
@@ -1083,7 +1211,7 @@ class GrokAutomationEngine:
                             continue
                         center_y = box["y"] + (box["height"] / 2.0)
                         input_mid_y = input_box["y"] + (input_box["height"] / 2.0)
-                        if abs(center_y - input_mid_y) < max(28, input_box["height"] * 0.8):
+                        if abs(center_y - input_mid_y) < max(60, input_box["height"] * 1.6):
                             score += 2600
                         else:
                             score -= 1500
@@ -1102,7 +1230,7 @@ class GrokAutomationEngine:
                         score += 120
                     if abs(box["width"] - box["height"]) < 20:
                         score += 200
-                    if box["width"] <= 56 and box["height"] <= 56:
+                    if box["width"] <= 80 and box["height"] <= 80:
                         score += 250
                     if "전송" in text or "Send" in text or "submit" in aria.lower():
                         score += 1000
@@ -1116,11 +1244,74 @@ class GrokAutomationEngine:
                         score -= 4000
                     if "저장" in text or "저장" in aria or "save" in text.lower() or "save" in aria.lower():
                         score -= 4000
+                    if "공유" in text or "share" in lowered_text or "share" in lowered_aria:
+                        score -= 3000
                     if score > best_score:
                         best_score = score
                         best = loc
                 except Exception:
                     continue
+        if best is not None and best_score > -900:
+            return best
+
+        fallback = None
+        fallback_score = -1.0
+        for selector in ("button", "[role='button']", "div", "span"):
+            try:
+                count = min(page.locator(selector).count(), 180)
+            except Exception:
+                continue
+            for idx in range(count):
+                try:
+                    loc = page.locator(selector).nth(idx)
+                    if not loc.is_visible():
+                        continue
+                    box = loc.bounding_box()
+                    if not box:
+                        continue
+                    text = (loc.inner_text(timeout=100) or "").strip()
+                    aria = (loc.get_attribute("aria-label") or "").strip()
+                    lowered_text = text.lower()
+                    lowered_aria = aria.lower()
+                    if "이미지" in text or "image" in lowered_text or "image" in lowered_aria:
+                        continue
+                    if "비디오" in text or "video" in lowered_text or "video" in lowered_aria:
+                        continue
+                    if "업로드" in text or "upload" in lowered_text or "upload" in lowered_aria:
+                        continue
+                    if "공유" in text or "share" in lowered_text or "share" in lowered_aria:
+                        continue
+                    if any(token in lowered_text for token in ("480p", "720p", "6s", "10s", "16:9", "9:16", "1:1", "2:3", "3:2")):
+                        continue
+                    if any(token in lowered_aria for token in ("480p", "720p", "6s", "10s", "16:9", "9:16", "1:1", "2:3", "3:2")):
+                        continue
+                    score = 0.0
+                    if box["x"] > viewport["width"] * 0.72:
+                        score += 2400
+                    if box["y"] > viewport["height"] * 0.72:
+                        score += 2400
+                    if 20 <= box["width"] <= 84 and 20 <= box["height"] <= 84:
+                        score += 500
+                    if abs(box["width"] - box["height"]) < 20:
+                        score += 220
+                    if "submit" in lowered_aria or "전송" in text or "전송" in aria:
+                        score += 1800
+                    if input_box:
+                        center_y = box["y"] + (box["height"] / 2.0)
+                        input_mid_y = input_box["y"] + (input_box["height"] / 2.0)
+                        if abs(center_y - input_mid_y) < 120:
+                            score += 1200
+                        if box["x"] >= (input_box["x"] + input_box["width"] - 120):
+                            score += 1200
+                    if not text and not aria:
+                        score += 80
+                    if score > fallback_score:
+                        fallback_score = score
+                        fallback = loc
+                except Exception:
+                    continue
+        if fallback is not None and fallback_score > 2000:
+            return fallback
         return best
 
     def _download_latest_result(

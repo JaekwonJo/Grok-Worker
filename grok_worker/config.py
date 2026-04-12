@@ -52,6 +52,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "break_every_count": 0,
     "break_minutes": 0.0,
     "window_geometry": "920x560",
+    "lower_pane_sash": 460,
     "settings_collapsed": False,
     "grok_site_url": "https://grok.com/imagine",
 }
