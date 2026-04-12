@@ -1678,36 +1678,14 @@ class GrokAutomationEngine:
                 pass
 
         viewport = page.viewport_size or {"width": 1440, "height": 940}
-        toolbar_candidates = []
-        for selector in ("button", "[role='button']"):
-            try:
-                locator = page.locator(selector)
-                count = min(locator.count(), 220)
-            except Exception:
-                continue
-            for idx in range(count):
-                try:
-                    loc = locator.nth(idx)
-                    if not loc.is_visible():
-                        continue
-                    if self._is_video_toolbar_noise(loc):
-                        continue
-                    box = loc.bounding_box()
-                    if not box:
-                        continue
-                    if box["x"] < viewport["width"] * (0.82 if video_mode else 0.70):
-                        continue
-                    if not (24 <= box["width"] <= 72 and 24 <= box["height"] <= 72):
-                        continue
-                    if box["y"] < viewport["height"] * (0.22 if video_mode else 0.12) or box["y"] > viewport["height"] * 0.95:
-                        continue
-                    if not self._locator_is_enabled(loc):
-                        continue
-                    toolbar_candidates.append((float(box["y"]), loc))
-                except Exception:
-                    continue
+        toolbar_candidates = self._collect_right_toolbar_buttons(page, include_disabled=False)
         if len(toolbar_candidates) >= 2:
             toolbar_candidates.sort(key=lambda item: item[0])
+            # Grok 결과 화면은 보통 세로 툴바 맨 아래가 "...", 그 위가 공유, 그 위가 다운로드입니다.
+            if len(toolbar_candidates) >= 3:
+                _push(toolbar_candidates[-3][1])
+            if len(toolbar_candidates) >= 2:
+                _push(toolbar_candidates[-2][1])
             if video_mode:
                 video_toolbar = [(y, loc) for y, loc in toolbar_candidates if y > viewport["height"] * 0.22]
                 if video_toolbar:
@@ -1733,16 +1711,12 @@ class GrokAutomationEngine:
                         if self._is_video_toolbar_noise(candidate):
                             continue
                         _push(candidate)
-                    if not results and len(video_toolbar) >= 3:
-                        _push(video_toolbar[-3][1])
-                    if not results and len(video_toolbar) >= 4:
+                    if len(video_toolbar) >= 4:
                         _push(video_toolbar[-4][1])
                 return results
             else:
-                # 이미지는 보통 맨 아래는 더보기, 그 위가 다운로드인 경우가 많습니다.
-                _push(toolbar_candidates[-2][1])
-                if len(toolbar_candidates) >= 3:
-                    _push(toolbar_candidates[-3][1])
+                if len(toolbar_candidates) >= 4:
+                    _push(toolbar_candidates[-4][1])
         return results
 
     def _download_video_via_more_menu(self, *, page, item: PromptBlock, download_dir: Path, log: LogFn) -> Path:
@@ -1781,51 +1755,51 @@ class GrokAutomationEngine:
             pass
 
     def _find_video_more_button(self, page, require_enabled: bool = False):
+        toolbar_candidates = self._collect_right_toolbar_buttons(page, include_disabled=not require_enabled)
+        if not toolbar_candidates:
+            return None
+        toolbar_candidates.sort(key=lambda item: item[0])
+        for _y, loc in reversed(toolbar_candidates):
+            if self._is_more_button(loc):
+                if require_enabled and not self._locator_is_enabled(loc):
+                    continue
+                return loc
+        candidate = toolbar_candidates[-1][1]
+        if require_enabled and not self._locator_is_enabled(candidate):
+            return None
+        return candidate
+
+    def _collect_right_toolbar_buttons(self, page, include_disabled: bool = False) -> list[tuple[float, object]]:
         viewport = page.viewport_size or {"width": 1440, "height": 940}
-        best = None
-        best_score = -1.0
-        for selector in ("button", "[role='button']", "div", "span"):
+        toolbar_candidates = []
+        for selector in ("button", "[role='button']"):
             try:
-                count = min(page.locator(selector).count(), 180)
+                locator = page.locator(selector)
+                count = min(locator.count(), 220)
             except Exception:
                 continue
             for idx in range(count):
                 try:
-                    loc = page.locator(selector).nth(idx)
+                    loc = locator.nth(idx)
                     if not loc.is_visible():
-                        continue
-                    if require_enabled and not self._locator_is_enabled(loc):
                         continue
                     box = loc.bounding_box()
                     if not box:
                         continue
                     if box["x"] < viewport["width"] * 0.78:
                         continue
-                    text = (loc.inner_text(timeout=100) or "").strip()
-                    aria = (loc.get_attribute("aria-label") or "").strip()
-                    lowered_text = text.lower().replace(" ", "")
-                    lowered_aria = aria.lower().replace(" ", "")
-                    score = 0.0
-                    if "더보기" in text or "추가 옵션" in text or "추가 옵션" in aria or "more" in lowered_text or "more" in lowered_aria:
-                        score += 5000
-                    if 20 <= box["width"] <= 70 and 20 <= box["height"] <= 70:
-                        score += 800
-                    if box["y"] > viewport["height"] * 0.68:
-                        score += 900
-                    if box["y"] > viewport["height"] * 0.80:
-                        score += 700
-                    if "다운로드" in text or "download" in lowered_text or "download" in lowered_aria:
-                        score -= 4000
-                    if "음소거" in text or "mute" in lowered_aria:
-                        score -= 3000
-                    if "동영상" in text and "다시" in text:
-                        score -= 3000
-                    if score > best_score:
-                        best_score = score
-                        best = loc
+                    if not (24 <= box["width"] <= 72 and 24 <= box["height"] <= 72):
+                        continue
+                    if box["y"] < viewport["height"] * 0.18 or box["y"] > viewport["height"] * 0.95:
+                        continue
+                    if (not include_disabled) and (not self._locator_is_enabled(loc)):
+                        continue
+                    if self._is_video_toolbar_noise(loc):
+                        continue
+                    toolbar_candidates.append((float(box["y"]), loc))
                 except Exception:
                     continue
-        return best
+        return toolbar_candidates
 
     def _is_download_button(self, locator) -> bool:
         try:
