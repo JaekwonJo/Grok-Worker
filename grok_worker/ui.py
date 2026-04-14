@@ -879,7 +879,7 @@ class GrokWorkerApp:
 
     def copy_failed_numbers(self) -> None:
         failed = [item.number for item in self.queue_items if item.status == "failed"]
-        text = compress_numbers(failed, prefix="G")
+        text = compress_numbers(failed)
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
         self.log(f"실패 번호 복사: {text or '(없음)'}")
