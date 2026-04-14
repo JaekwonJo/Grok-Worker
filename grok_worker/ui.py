@@ -5,13 +5,14 @@ import re
 import threading
 import time
 import tkinter as tk
+import math
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog
 
 from .automation import GrokAutomationEngine
 from .browser import BrowserManager
-from .config import CONFIG_FILE, DEFAULT_CONFIG, LOGS_DIR, next_prompt_slot_file, save_config, load_config
+from .config import CONFIG_FILE, DEFAULT_CONFIG, LOGS_DIR, default_attach_profile_dir, next_prompt_slot_file, save_config, load_config
 from .prompt_parser import compress_numbers, summarize_prompt_file
 from .queue_state import QueueItem
 
@@ -38,6 +39,7 @@ class GrokWorkerApp:
             self.cfg["browser_attach_url"] = self.forced_attach_url
         if self.forced_worker_name:
             self.cfg["worker_name"] = self.forced_worker_name
+        self._normalize_browser_profile_dir()
         self.theme = self._build_theme()
         self._suspend_auto_save = True
         self.browser = BrowserManager(self.log)
@@ -45,10 +47,16 @@ class GrokWorkerApp:
         self.log_lines: list[str] = []
         self.run_log_path: Path | None = None
         self.run_log_fp = None
+        self.action_trace_path: Path | None = None
+        self.action_trace_fp = None
         self.run_thread: threading.Thread | None = None
         self.stop_event = threading.Event()
         self.pause_event = threading.Event()
         self.settings_collapsed = False
+        self.log_panel_visible = False
+        self._status_countdown_after_id: str | None = None
+        self._status_countdown_deadline: float | None = None
+        self._status_countdown_prefix: str | None = None
 
         self.root = tk.Tk()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
@@ -245,23 +253,19 @@ class GrokWorkerApp:
         lower = tk.Frame(body, bg=self._bg("root_bg"))
         self.lower_frame = lower
         lower.pack(fill="both", expand=True, pady=(8, 0))
-        self.lower_pane = tk.PanedWindow(
-            lower,
-            orient=tk.HORIZONTAL,
-            sashwidth=8,
-            showhandle=False,
-            bg=self._bg("root_bg"),
-            bd=0,
-            relief="flat",
-        )
-        self.lower_pane.pack(fill="both", expand=True)
+        lower_content = tk.Frame(lower, bg=self._bg("root_bg"))
+        self.lower_content = lower_content
+        lower_content.pack(fill="both", expand=True)
 
-        queue_wrap = tk.Frame(self.lower_pane, bg=self._bg("queue_panel_bg"), highlightbackground=self._bg("queue_panel_border"), highlightthickness=1)
+        queue_wrap = tk.Frame(lower_content, bg=self._bg("queue_panel_bg"), highlightbackground=self._bg("queue_panel_border"), highlightthickness=1)
         self.queue_wrap = queue_wrap
+        queue_wrap.pack(side="left", fill="both", expand=True)
 
         queue_header = tk.Frame(queue_wrap, bg=self._bg("queue_panel_bg"))
         queue_header.pack(fill="x", padx=8, pady=(8, 4))
         tk.Label(queue_header, text="대기열", bg=self._bg("queue_panel_bg"), fg="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(side="left")
+        self.log_toggle_btn = self._action_button(queue_header, "로그 보기", self.toggle_log_panel, self._bg("open_btn_bg"), small=True)
+        self.log_toggle_btn.pack(side="right", padx=(8, 0))
         self._action_button(queue_header, "실패 번호 복붙", self.copy_failed_numbers, self._bg("open_btn_bg"), small=True).pack(side="right", padx=(8, 0))
         self._action_button(queue_header, "지우기", self.clear_queue, self._bg("open_btn_bg"), small=True).pack(side="right")
         tk.Label(queue_header, textvariable=self.queue_summary_var, bg=self._bg("queue_panel_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 8)).pack(side="right", padx=(10, 12))
@@ -279,17 +283,14 @@ class GrokWorkerApp:
         self.queue_canvas.bind("<Configure>", self._on_queue_canvas_resize)
         self.queue_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
-        log_frame = tk.Frame(self.lower_pane, bg=self._bg("log_panel_bg"), highlightbackground=self._bg("queue_panel_border"), highlightthickness=1)
+        log_frame = tk.Frame(lower_content, bg=self._bg("log_panel_bg"), highlightbackground=self._bg("queue_panel_border"), highlightthickness=1, width=250)
         self.log_frame = log_frame
+        log_frame.pack_propagate(False)
         tk.Label(log_frame, text="로그", bg=self._bg("log_panel_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
         self.log_text = tk.Text(log_frame, height=6, bg=self._bg("log_text_bg"), fg=self._bg("log_text_fg"), insertbackground="#ffffff", relief="solid", borderwidth=1)
         self.log_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.log_text.configure(state="disabled")
-
-        self.lower_pane.add(queue_wrap, minsize=300)
-        self.lower_pane.add(log_frame, minsize=260)
-        self.lower_pane.bind("<ButtonRelease-1>", self._on_lower_pane_released)
-        self.root.after(120, self._restore_lower_pane_sash)
+        self.root.after(120, self._apply_log_panel_visibility)
 
     def _build_basic_settings(self, parent: tk.Frame) -> None:
         tk.Label(parent, text="기본 설정", bg=self._bg("settings_bg"), fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
@@ -318,6 +319,17 @@ class GrokWorkerApp:
             padx=10,
             pady=5,
         ).pack(anchor="w", pady=(6, 0))
+        self.browser_profile_state_label = tk.Label(
+            attach_note,
+            text="현재 프로필: -",
+            bg=self._bg("settings_bg"),
+            fg=self._bg("sub_fg"),
+            font=("Malgun Gothic", 9),
+        )
+        self.browser_profile_state_label.pack(anchor="w", pady=(8, 4))
+        profile_btn_row = tk.Frame(attach_note, bg=self._bg("settings_bg"))
+        profile_btn_row.pack(fill="x")
+        self._action_button(profile_btn_row, "새 브라우저 프로필 만들기", self.create_browser_profile, self._bg("open_btn_bg"), small=True).pack(side="left")
 
     def _build_number_settings(self, parent: tk.Frame) -> None:
         tk.Label(parent, text="번호 설정", bg=self._bg("settings_bg"), fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
@@ -540,6 +552,7 @@ class GrokWorkerApp:
         self.break_every_var.set(str(self.cfg.get("break_every_count", 0) or 0))
         self.break_minutes_var.set(str(self.cfg.get("break_minutes", 0.0) or 0.0))
         self.settings_collapsed = bool(self.cfg.get("settings_collapsed", False))
+        self.log_panel_visible = bool(self.cfg.get("log_panel_visible", False))
 
     def _write_vars_to_config(self) -> None:
         slots = self.cfg.get("prompt_slots") or []
@@ -566,6 +579,7 @@ class GrokWorkerApp:
         self.cfg["window_geometry"] = self.root.geometry()
         self.cfg["lower_pane_sash"] = self._current_lower_pane_sash()
         self.cfg["settings_collapsed"] = bool(self.settings_collapsed)
+        self.cfg["log_panel_visible"] = bool(self.log_panel_visible)
 
         slot_name = self.prompt_slot_var.get().strip()
         for idx, slot in enumerate(slots):
@@ -593,6 +607,7 @@ class GrokWorkerApp:
         self.on_number_mode_changed()
         self._apply_settings_visibility()
         self._apply_media_visibility()
+        self._apply_log_panel_visibility()
         self.refresh_summary_only()
         self._render_queue()
 
@@ -600,6 +615,11 @@ class GrokWorkerApp:
         self.settings_collapsed = not self.settings_collapsed
         self._apply_settings_visibility()
         self.auto_save("설정 접기/펼치기 변경")
+
+    def toggle_log_panel(self) -> None:
+        self.log_panel_visible = not self.log_panel_visible
+        self._apply_log_panel_visibility()
+        self.auto_save("로그 패널 표시 변경")
 
     def on_media_mode_changed(self) -> None:
         self._apply_media_visibility()
@@ -618,6 +638,17 @@ class GrokWorkerApp:
                 self.settings_frame.pack(fill="x", before=self.lower_frame)
             self.settings_toggle_btn.configure(text="⚙ 설정 접기")
 
+    def _apply_log_panel_visibility(self) -> None:
+        if self.log_panel_visible:
+            if not self.log_frame.winfo_manager():
+                self.log_frame.pack(side="right", fill="both", padx=(8, 0))
+            self.log_toggle_btn.configure(text="로그 숨기기")
+        else:
+            if self.log_frame.winfo_manager():
+                self.log_frame.pack_forget()
+            self.log_toggle_btn.configure(text="로그 보기")
+            self.root.after(50, self._render_queue)
+
     def _apply_media_visibility(self) -> None:
         if self.media_mode_var.get().strip() == "video":
             if not self.video_settings_frame.winfo_manager():
@@ -633,6 +664,7 @@ class GrokWorkerApp:
         media_label = "비디오" if str(self.cfg.get("media_mode") or "image") == "video" else "이미지"
         self.project_summary_var.set(f"사이트: grok.com/imagine | 기존 Edge 연결 | {media_label}")
         self.attach_url_var.set(f"기존 Edge 연결 고정 | {attach_url}")
+        self._refresh_browser_profile_ui()
         slots = self.cfg.get("prompt_slots") or []
         slot_idx = int(self.cfg.get("prompt_slot_index", 0) or 0)
         if slots:
@@ -747,12 +779,9 @@ class GrokWorkerApp:
         self._write_vars_to_config()
         url = str(self.cfg.get("grok_site_url") or "https://grok.com/imagine")
         attach_url = str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222")
-        port_match = re.search(r":(\d+)$", attach_url)
-        port = int(port_match.group(1)) if port_match else 9222
-        profile_index = max(1, port - 9221)
-        profile_dir = str(self.base_dir / "runtime" / f"edge_attach_profile_{profile_index}")
+        profile_dir = str(self._browser_profile_path())
         launch_mode = "edge_attach"
-        self.browser.open_project(url, profile_dir, launch_mode, attach_url)
+        self.browser.open_project(url, profile_dir, launch_mode, attach_url, self.cfg)
 
     def start_run(self) -> None:
         if self.run_thread and self.run_thread.is_alive():
@@ -765,7 +794,7 @@ class GrokWorkerApp:
             self.queue_items = []
             self._render_queue()
             self._refresh_progress_display()
-            self.status_var.set("선택된 작업 없음")
+            self._set_status_text("선택된 작업 없음")
             if str(self.cfg.get("number_mode") or "") == "manual" and not str(self.cfg.get("manual_numbers") or "").strip():
                 messagebox.showwarning("개별 번호 비어 있음", "지금은 `개별`이 켜져 있는데 번호칸이 비어 있어요.\n번호를 적거나 `연속`으로 바꿔주세요.", parent=self.root)
                 self.log("작업 준비 실패: 개별 번호칸이 비어 있어서 실행할 작업이 없습니다.")
@@ -773,6 +802,7 @@ class GrokWorkerApp:
                 self.log("작업 준비: 선택된 작업 없음")
             return
         self._open_run_log_file()
+        self._open_action_trace_file()
         self.queue_items = [
             QueueItem(number=item.number, tag=item.tag, prompt=item.rendered_prompt, status="pending", message=item.body)
             for item in plan.items
@@ -782,7 +812,7 @@ class GrokWorkerApp:
         self._refresh_progress_display()
         self.stop_event.clear()
         self.pause_event.clear()
-        self.status_var.set("작업 시작")
+        self._set_status_text("작업 시작")
         self.run_thread = threading.Thread(target=self._run_plan_thread, args=(plan,), daemon=True)
         self.run_thread.start()
 
@@ -794,17 +824,17 @@ class GrokWorkerApp:
 
     def pause_run(self) -> None:
         self.pause_event.set()
-        self.status_var.set("일시정지")
+        self._set_status_text("일시정지")
         self.log("일시정지")
 
     def resume_run(self) -> None:
         self.pause_event.clear()
-        self.status_var.set("재개")
+        self._set_status_text("재개")
         self.log("재개")
 
     def clear_queue(self) -> None:
         self.queue_items = []
-        self.status_var.set("준비 완료")
+        self._set_status_text("준비 완료")
         self._render_queue()
         self._refresh_progress_display()
         self.log("대기열 초기화")
@@ -903,25 +933,13 @@ class GrokWorkerApp:
             pass
 
     def _current_lower_pane_sash(self) -> int:
-        try:
-            return max(280, int(self.lower_pane.sash_coord(0)[0]))
-        except Exception:
-            return int(self.cfg.get("lower_pane_sash", 460) or 460)
+        return int(self.cfg.get("lower_pane_sash", 700) or 700)
 
     def _restore_lower_pane_sash(self) -> None:
-        try:
-            self.lower_pane.update_idletasks()
-            total_width = max(640, int(self.lower_pane.winfo_width()))
-            saved = int(self.cfg.get("lower_pane_sash", 460) or 460)
-            target = min(total_width - 260, max(300, saved))
-            self.lower_pane.sash_place(0, target, 1)
-        except Exception:
-            pass
+        return
 
     def _on_lower_pane_released(self, _event=None) -> None:
-        if self._suspend_auto_save:
-            return
-        self.auto_save("대기열/로그 너비 변경")
+        return
 
     def log(self, message: str) -> None:
         line = str(message or "").strip()
@@ -962,6 +980,80 @@ class GrokWorkerApp:
         except Exception:
             return default
 
+    def _default_browser_profile_dir(self) -> str:
+        attach_url = str(self.cfg.get("browser_attach_url") or self.forced_attach_url or "http://127.0.0.1:9222").strip()
+        return default_attach_profile_dir(attach_url)
+
+    def _normalize_browser_profile_dir(self) -> None:
+        current = str(self.cfg.get("browser_profile_dir") or "").strip()
+        if (not current) or current == "runtime/browser_profile_1":
+            self.cfg["browser_profile_dir"] = self._default_browser_profile_dir()
+
+    def _browser_profile_dir_name(self) -> str:
+        self._normalize_browser_profile_dir()
+        return str(self.cfg.get("browser_profile_dir") or self._default_browser_profile_dir()).strip()
+
+    def _browser_profile_path(self) -> Path:
+        raw = self._browser_profile_dir_name()
+        path = Path(raw)
+        if not path.is_absolute():
+            path = self.base_dir / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _suggest_new_browser_profile_dir(self) -> str:
+        current = self._browser_profile_dir_name()
+        stem = Path(current).name
+        parent = Path(current).parent.as_posix()
+        match = re.match(r"^(.*?)(?:_v(\d+))?$", stem)
+        if match:
+            base_name = (match.group(1) or "edge_attach_profile").strip() or "edge_attach_profile"
+            current_no = int(match.group(2)) if match.group(2) else 1
+        else:
+            base_name = stem or "edge_attach_profile"
+            current_no = 1
+        candidate_no = max(2, current_no + 1)
+        while True:
+            candidate_name = f"{base_name}_v{candidate_no}"
+            rel = f"{parent}/{candidate_name}" if parent not in {"", "."} else candidate_name
+            candidate_path = self.base_dir / rel
+            if not candidate_path.exists():
+                return rel.replace("\\", "/")
+            candidate_no += 1
+
+    def _refresh_browser_profile_ui(self) -> None:
+        if hasattr(self, "browser_profile_state_label"):
+            self.browser_profile_state_label.config(text=f"현재 프로필: {Path(self._browser_profile_dir_name()).name}")
+
+    def create_browser_profile(self) -> None:
+        if self.run_thread and self.run_thread.is_alive():
+            messagebox.showwarning("안내", "작업 실행 중에는 새 브라우저 프로필을 만들 수 없습니다.\n먼저 중지 후 시도해주세요.", parent=self.root)
+            return
+        self._write_vars_to_config()
+        current = self._browser_profile_dir_name()
+        new_profile = self._suggest_new_browser_profile_dir()
+        new_path = self.base_dir / new_profile
+        try:
+            new_path.mkdir(parents=True, exist_ok=True)
+            self.cfg["browser_profile_dir"] = new_profile.replace("\\", "/")
+            save_config(self.base_dir, self.cfg, self.config_name)
+            self._refresh_browser_profile_ui()
+            self.refresh_summary_only()
+            self.log(f"🆕 새 브라우저 프로필 준비 완료: {Path(current).name} -> {Path(new_profile).name}")
+            messagebox.showinfo(
+                "새 브라우저 프로필 만들기",
+                "새 브라우저 프로필을 만들었습니다.\n\n"
+                f"- 이전 프로필: {Path(current).name}\n"
+                f"- 새 프로필: {Path(new_profile).name}\n\n"
+                "이제 Edge 실행 파일을 다시 열면 새 프로필로 켜집니다.\n"
+                "1. 기존 Edge 작업창 닫기\n"
+                "2. 워커용 Edge 실행 파일 다시 열기\n"
+                "3. 로그인 1번 진행하기",
+                parent=self.root,
+            )
+        except Exception as exc:
+            messagebox.showerror("새 브라우저 프로필 만들기 실패", f"프로필 생성 중 오류가 났습니다.\n{exc}", parent=self.root)
+
     def on_close(self) -> None:
         self.stop_event.set()
         self.pause_event.clear()
@@ -969,6 +1061,7 @@ class GrokWorkerApp:
         save_config(self.base_dir, self.cfg, self.config_name)
         self.browser.stop()
         self._close_run_log_file()
+        self._close_action_trace_file()
         self.root.destroy()
 
     def _run_plan_thread(self, plan) -> None:
@@ -977,6 +1070,7 @@ class GrokWorkerApp:
             engine.run(
                 plan=plan,
                 log=self._thread_log,
+                trace_action=self._thread_trace,
                 set_status=self._thread_status,
                 update_queue=self._thread_queue_update,
                 should_stop=self.stop_event.is_set,
@@ -989,6 +1083,7 @@ class GrokWorkerApp:
             self.root.after(0, self._render_queue)
             self.root.after(0, self._refresh_progress_display)
             self.root.after(0, self._close_run_log_file)
+            self.root.after(0, self._close_action_trace_file)
 
     def _thread_wait_if_paused(self) -> None:
         while self.pause_event.is_set() and not self.stop_event.is_set():
@@ -997,8 +1092,48 @@ class GrokWorkerApp:
     def _thread_log(self, message: str) -> None:
         self.root.after(0, lambda m=message: self.log(m))
 
+    def _thread_trace(self, message: str) -> None:
+        self.root.after(0, lambda m=message: self._write_action_trace_message(m))
+
     def _thread_status(self, text: str) -> None:
-        self.root.after(0, lambda t=text: self.status_var.set(t))
+        self.root.after(0, lambda t=text: self._set_status_text(t))
+
+    def _cancel_status_countdown(self) -> None:
+        if self._status_countdown_after_id is not None:
+            try:
+                self.root.after_cancel(self._status_countdown_after_id)
+            except Exception:
+                pass
+        self._status_countdown_after_id = None
+        self._status_countdown_deadline = None
+        self._status_countdown_prefix = None
+
+    def _tick_status_countdown(self) -> None:
+        deadline = self._status_countdown_deadline
+        prefix = self._status_countdown_prefix
+        if deadline is None or not prefix:
+            self._status_countdown_after_id = None
+            return
+        remain = max(0, int(math.ceil(deadline - time.time())))
+        self.status_var.set(f"{prefix} {remain}초")
+        if remain <= 0:
+            self._status_countdown_after_id = None
+            return
+        self._status_countdown_after_id = self.root.after(200, self._tick_status_countdown)
+
+    def _set_status_text(self, text: str) -> None:
+        raw = str(text or "").strip()
+        match = re.match(r"^(.*?)(\d+)초$", raw)
+        if match:
+            prefix = str(match.group(1) or "").rstrip()
+            seconds = max(0, int(match.group(2) or 0))
+            self._cancel_status_countdown()
+            self._status_countdown_prefix = prefix
+            self._status_countdown_deadline = time.time() + seconds
+            self._tick_status_countdown()
+            return
+        self._cancel_status_countdown()
+        self.status_var.set(raw)
 
     def _thread_queue_update(self, number: int, status: str, message: str, file_name: str) -> None:
         def _apply():
@@ -1041,3 +1176,34 @@ class GrokWorkerApp:
             except Exception:
                 pass
         self.run_log_fp = None
+
+    def _open_action_trace_file(self) -> None:
+        self._close_action_trace_file()
+        logs_dir = self.base_dir / LOGS_DIR
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_slug = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(self.config_name).stem).strip("_") or "worker"
+        self.action_trace_path = logs_dir / f"grok_worker_action_trace_{log_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        self.action_trace_fp = self.action_trace_path.open("a", encoding="utf-8")
+        self._write_action_trace_message(f"액션 로그 파일 생성: {self.action_trace_path}")
+        self.log(f"액션 트레이스 로그 생성: {self.action_trace_path}")
+
+    def _write_action_trace_message(self, message: str) -> None:
+        line = str(message or "").strip()
+        if not line or self.action_trace_fp is None:
+            return
+        stamped = f"[{datetime.now().strftime('%H:%M:%S')}] {line}"
+        try:
+            self.action_trace_fp.write(stamped + "\n")
+            self.action_trace_fp.flush()
+        except Exception:
+            pass
+
+    def _close_action_trace_file(self) -> None:
+        if self.action_trace_fp is not None:
+            try:
+                self._write_action_trace_message("액션 로그 종료")
+                self.action_trace_fp.flush()
+                self.action_trace_fp.close()
+            except Exception:
+                pass
+        self.action_trace_fp = None

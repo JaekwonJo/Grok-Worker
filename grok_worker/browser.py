@@ -4,6 +4,8 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from .windowing import apply_edge_window_bounds
+
 
 LogFn = Callable[[str], None]
 
@@ -14,7 +16,7 @@ class BrowserManager:
         self.thread: threading.Thread | None = None
         self.stop_event = threading.Event()
 
-    def open_project(self, url: str, profile_dir: str, launch_mode: str = "managed", attach_url: str = "") -> None:
+    def open_project(self, url: str, profile_dir: str, launch_mode: str = "managed", attach_url: str = "", window_cfg: dict | None = None) -> None:
         if self.thread and self.thread.is_alive():
             self.log("브라우저 작업봇 창이 이미 열려 있습니다.")
             return
@@ -26,6 +28,7 @@ class BrowserManager:
                 str(profile_dir or "").strip(),
                 str(launch_mode or "").strip().lower(),
                 str(attach_url or "").strip(),
+                window_cfg if isinstance(window_cfg, dict) else {},
             ),
             daemon=True,
         )
@@ -34,7 +37,7 @@ class BrowserManager:
     def stop(self, close_window: bool = False) -> None:
         self.stop_event.set()
 
-    def _run_browser(self, url: str, profile_dir: str, launch_mode: str, attach_url: str) -> None:
+    def _run_browser(self, url: str, profile_dir: str, launch_mode: str, attach_url: str, window_cfg: dict) -> None:
         try:
             from playwright.sync_api import sync_playwright
         except Exception as exc:
@@ -66,6 +69,7 @@ class BrowserManager:
                         page.bring_to_front()
                     except Exception:
                         pass
+                    apply_edge_window_bounds(page, window_cfg, log=self.log, reason="작업봇 창 열기")
                 else:
                     try:
                         context = p.chromium.launch_persistent_context(
@@ -87,6 +91,7 @@ class BrowserManager:
                     if page is None:
                         page = context.new_page()
                     page.goto(target_url, wait_until="domcontentloaded")
+                    apply_edge_window_bounds(page, window_cfg, log=self.log, reason="작업봇 창 열기")
                 self.log("브라우저 준비 완료")
                 while not self.stop_event.wait(0.5):
                     pass

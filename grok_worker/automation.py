@@ -14,6 +14,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 from .prompt_parser import PromptBlock, REFERENCE_TOKEN_RE, load_prompt_blocks
+from .windowing import apply_edge_window_bounds
 
 
 LogFn = Callable[[str], None]
@@ -35,6 +36,7 @@ class GrokAutomationEngine:
     def __init__(self, base_dir: Path, cfg: dict):
         self.base_dir = Path(base_dir)
         self.cfg = cfg
+        self._last_download_box_by_mode: dict[str, tuple[float, float]] = {}
 
     def build_plan(self) -> RunPlan:
         prompt_slots = list(self.cfg.get("prompt_slots") or [])
@@ -58,6 +60,7 @@ class GrokAutomationEngine:
         *,
         plan: RunPlan,
         log: LogFn,
+        trace_action: LogFn | None = None,
         set_status: StatusFn,
         update_queue: QueueFn,
         should_stop: StopFn,
@@ -76,6 +79,7 @@ class GrokAutomationEngine:
         break_every_count = self._break_every_count()
         break_minutes = self._break_minutes()
         media_mode = self._media_mode()
+        trace = trace_action or (lambda _message: None)
 
         set_status("브라우저 준비 중")
         log(f"🌐 Grok 실행 시작 | {plan.selection_summary}")
@@ -129,6 +133,7 @@ class GrokAutomationEngine:
                                 download_dir=download_dir,
                                 timeout_seconds=generate_wait_seconds,
                                 log=log,
+                                trace_action=trace,
                                 set_status=set_status,
                                 should_stop=should_stop,
                                 wait_if_paused=wait_if_paused,
@@ -381,6 +386,7 @@ class GrokAutomationEngine:
                 page.bring_to_front()
             except Exception:
                 pass
+            apply_edge_window_bounds(page, self.cfg, log=log, reason="Edge 연결 직후")
             log("🌐 기존 Edge 창 연결 완료")
             return context, page, False
 
@@ -389,6 +395,7 @@ class GrokAutomationEngine:
         if page is None:
             page = context.new_page()
         page.goto(site_url, wait_until="domcontentloaded", timeout=60000)
+        apply_edge_window_bounds(page, self.cfg, log=log, reason="브라우저 실행 직후")
         return context, page, True
 
     def _pick_browser_context(self, browser, site_url: str):
@@ -447,6 +454,38 @@ class GrokAutomationEngine:
                     continue
             time.sleep(0.5)
         raise RuntimeError("Grok 입력창을 찾지 못했습니다.")
+
+    def _viewport_size(self, page) -> dict[str, float]:
+        viewport = page.viewport_size
+        if viewport and viewport.get("width") and viewport.get("height"):
+            return {
+                "width": float(viewport["width"]),
+                "height": float(viewport["height"]),
+            }
+        try:
+            size = page.evaluate(
+                """
+                () => ({
+                    width: Math.max(
+                        window.innerWidth || 0,
+                        document.documentElement?.clientWidth || 0,
+                        document.body?.clientWidth || 0
+                    ),
+                    height: Math.max(
+                        window.innerHeight || 0,
+                        document.documentElement?.clientHeight || 0,
+                        document.body?.clientHeight || 0
+                    ),
+                })
+                """
+            ) or {}
+            width = float(size.get("width") or 0)
+            height = float(size.get("height") or 0)
+            if width >= 320 and height >= 240:
+                return {"width": width, "height": height}
+        except Exception:
+            pass
+        return {"width": 1440.0, "height": 940.0}
 
     def _apply_generation_settings(self, page, item_tag: str, log: LogFn, set_status: StatusFn) -> None:
         mode = self._media_mode()
@@ -514,8 +553,11 @@ class GrokAutomationEngine:
                     continue
         if best is None:
             return False
-        best.click(timeout=4000)
-        return True
+        try:
+            best.click(timeout=4000)
+            return True
+        except Exception:
+            return False
 
     def _dismiss_generation_overlay(self, page) -> None:
         for _ in range(2):
@@ -649,7 +691,10 @@ class GrokAutomationEngine:
         if target in current_blob:
             return True
 
-        trigger.click(timeout=4000)
+        try:
+            trigger.click(timeout=4000)
+        except Exception:
+            return False
         time.sleep(0.2)
 
         option = None
@@ -675,12 +720,15 @@ class GrokAutomationEngine:
 
         if option is None:
             return False
-        option.click(timeout=4000)
+        try:
+            option.click(timeout=4000)
+        except Exception:
+            return False
         time.sleep(0.15)
         return True
 
     def _find_prompt_input(self, page):
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         best = None
         best_score = -1.0
         selectors = ["textarea", "[contenteditable='true']", "[role='textbox']"]
@@ -711,7 +759,7 @@ class GrokAutomationEngine:
         return best
 
     def _find_plus_button(self, page, input_loc=None):
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         input_box = None
         if input_loc is not None:
             try:
@@ -1234,7 +1282,7 @@ class GrokAutomationEngine:
         return best
 
     def _collect_reference_panel_images(self, page):
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         candidates = []
         seen = set()
         try:
@@ -1300,6 +1348,37 @@ class GrokAutomationEngine:
             )
         return f"text='{text[:40]}' aria='{aria[:40]}'"
 
+    def _locator_center(self, locator) -> tuple[float, float] | None:
+        try:
+            box = locator.bounding_box()
+        except Exception:
+            box = None
+        if not box:
+            return None
+        return (
+            float(box.get("x") or 0.0) + float(box.get("width") or 0.0) / 2.0,
+            float(box.get("y") or 0.0) + float(box.get("height") or 0.0) / 2.0,
+        )
+
+    def _remember_download_anchor(self, locator) -> None:
+        center = self._locator_center(locator)
+        if center is None:
+            return
+        self._last_download_box_by_mode[self._media_mode()] = center
+
+    def _sort_download_buttons_by_anchor(self, buttons: list) -> list:
+        anchor = self._last_download_box_by_mode.get(self._media_mode())
+        if not anchor:
+            return buttons
+
+        def _score(locator):
+            center = self._locator_center(locator)
+            if center is None:
+                return float("inf")
+            return abs(center[0] - anchor[0]) + abs(center[1] - anchor[1])
+
+        return sorted(buttons, key=_score)
+
     def _save_debug_screenshot(self, page, tag: str, log: LogFn) -> None:
         logs_dir = self.base_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -1312,7 +1391,7 @@ class GrokAutomationEngine:
             log(f"⚠️ 실패 스크린샷 저장 실패: {exc}")
 
     def _find_submit_button(self, page, input_loc=None):
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         input_box = None
         if input_loc is not None:
             try:
@@ -1453,15 +1532,19 @@ class GrokAutomationEngine:
         download_dir: Path,
         timeout_seconds: float,
         log: LogFn,
+        trace_action: LogFn,
         set_status: StatusFn,
         should_stop: StopFn,
         wait_if_paused: PauseFn,
     ) -> Path:
+        apply_edge_window_bounds(page, self.cfg, log=log, reason=f"{item.tag} 다운로드 전")
         log(f"⏳ 결과 생성 대기 (최대 {timeout_seconds:.1f}초)")
+        trace_action(f"{item.tag} 다운로드 대기 시작 | 모드={self._media_mode()} | 최대={timeout_seconds:.1f}초")
         download_buttons = self._wait_for_download_button_or_open_result(
             page=page,
             item_tag=item.tag,
             log=log,
+            trace_action=trace_action,
             set_status=set_status,
             should_stop=should_stop,
             wait_if_paused=wait_if_paused,
@@ -1471,7 +1554,7 @@ class GrokAutomationEngine:
             if self._media_mode() == "video":
                 try:
                     log("🎬 비디오 다운로드: 마지막 메뉴 경로 시도")
-                    return self._download_video_via_more_menu(page=page, item=item, download_dir=download_dir, log=log)
+                    return self._download_video_via_more_menu(page=page, item=item, download_dir=download_dir, log=log, trace_action=trace_action)
                 except Exception as exc:
                     raise RuntimeError(str(exc)) from exc
             raise RuntimeError("다운로드 버튼을 찾지 못했습니다.")
@@ -1480,10 +1563,12 @@ class GrokAutomationEngine:
         direct_buttons = [button for button in download_buttons if self._is_download_button(button)]
         if direct_buttons:
             download_buttons = direct_buttons
+        download_buttons = self._sort_download_buttons_by_anchor(download_buttons)
 
         for idx, download_button in enumerate(download_buttons, start=1):
             try:
                 log(f"⬇️ 다운로드 후보 {idx}: {self._describe_locator(download_button)}")
+                trace_action(f"{item.tag} 다운로드 후보 {idx}: {self._describe_locator(download_button)}")
                 with page.expect_download(timeout=8000) as download_info:
                     download_button.click(timeout=5000)
                 download = download_info.value
@@ -1492,19 +1577,23 @@ class GrokAutomationEngine:
                 target = download_dir / f"@{item.tag}{ext}"
                 target = self._unique_path(target)
                 download.save_as(str(target))
+                self._remember_download_anchor(download_button)
+                trace_action(f"{item.tag} 다운로드 성공 클릭 {idx}: {self._describe_locator(download_button)} -> {target.name}")
                 self._dismiss_browser_download_panel(page, log)
                 return target
             except Exception as exc:
                 last_error = exc
                 log(f"⚠️ 다운로드 후보 {idx} 실패: {exc}")
+                trace_action(f"{item.tag} 다운로드 후보 {idx} 실패: {exc}")
                 time.sleep(0.6)
         if self._media_mode() == "video":
             try:
                 log("🎬 비디오 다운로드: 마지막 메뉴 경로 시도")
-                return self._download_video_via_more_menu(page=page, item=item, download_dir=download_dir, log=log)
+                return self._download_video_via_more_menu(page=page, item=item, download_dir=download_dir, log=log, trace_action=trace_action)
             except Exception as exc:
                 last_error = exc
                 log(f"⚠️ 비디오 메뉴 다운로드 실패: {exc}")
+                trace_action(f"{item.tag} 비디오 메뉴 다운로드 실패: {exc}")
         raise RuntimeError(str(last_error) if last_error else "다운로드 버튼 클릭 후 저장이 시작되지 않았습니다.")
 
     def _wait_after_download(
@@ -1582,18 +1671,17 @@ class GrokAutomationEngine:
         page,
         item_tag: str,
         log: LogFn,
+        trace_action: LogFn,
         set_status: StatusFn,
         should_stop: StopFn,
         wait_if_paused: PauseFn,
         timeout_seconds: float,
     ) -> list:
         deadline = time.time() + max(0.5, timeout_seconds)
-        video_probe_delay = 0.0
-        if self._media_mode() == "video":
-            video_probe_delay = min(max(0.0, timeout_seconds), 90.0)
-        probe_after = time.time() + video_probe_delay
         opened_result = False
         last_remaining = None
+        last_candidate_signature = ""
+        started = time.time()
         while time.time() < deadline:
             if should_stop():
                 return None
@@ -1602,26 +1690,28 @@ class GrokAutomationEngine:
             remaining = max(0, int(math.ceil(deadline - time.time())))
             if remaining != last_remaining:
                 last_remaining = remaining
-                if self._media_mode() == "video" and time.time() < probe_after:
-                    probe_remaining = max(0, int(math.ceil(probe_after - time.time())))
-                    set_status(f"{item_tag} 비디오 생성 중 {probe_remaining}초")
+                if self._media_mode() == "video":
+                    set_status(f"{item_tag} 비디오 생성 확인 {remaining}초")
                 else:
                     set_status(f"{item_tag} 생성 대기 {remaining}초")
-            if self._media_mode() == "video" and time.time() < probe_after:
-                time.sleep(0.4)
-                continue
+            buttons = self._locate_download_buttons(page)
+            if buttons:
+                signature = " | ".join(self._describe_locator(button) for button in buttons[:6])
+                if signature != last_candidate_signature:
+                    trace_action(f"{item_tag} 다운로드 버튼 감지: {signature}")
+                    last_candidate_signature = signature
+                return buttons
             if self._media_mode() == "video" and self._is_video_still_generating(page):
                 time.sleep(0.4)
                 continue
-            buttons = self._locate_download_buttons(page)
-            if buttons:
-                return buttons
-            if not opened_result:
+            if (not opened_result) and (time.time() - started >= 1.0):
                 try:
                     set_status(f"{item_tag} 결과 카드 여는 중")
+                    trace_action(f"{item_tag} 결과 카드 열기 시도")
                     self._open_latest_result_card(page)
                     self._dismiss_feedback_popup(page, log)
                     opened_result = True
+                    trace_action(f"{item_tag} 결과 카드 열기 성공")
                     time.sleep(0.6)
                     continue
                 except Exception:
@@ -1677,7 +1767,7 @@ class GrokAutomationEngine:
             except Exception:
                 pass
 
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         toolbar_candidates = self._collect_right_toolbar_buttons(page, include_disabled=False)
         if len(toolbar_candidates) >= 2:
             toolbar_candidates.sort(key=lambda item: item[0])
@@ -1717,19 +1807,21 @@ class GrokAutomationEngine:
             else:
                 if len(toolbar_candidates) >= 4:
                     _push(toolbar_candidates[-4][1])
-        return results
+        return self._sort_download_buttons_by_anchor(results)
 
-    def _download_video_via_more_menu(self, *, page, item: PromptBlock, download_dir: Path, log: LogFn) -> Path:
+    def _download_video_via_more_menu(self, *, page, item: PromptBlock, download_dir: Path, log: LogFn, trace_action: LogFn) -> Path:
         more_button = self._find_video_more_button(page, require_enabled=True)
         if more_button is None:
             raise RuntimeError("비디오 더보기 버튼을 찾지 못했습니다.")
         log(f"🎬 더보기 버튼: {self._describe_locator(more_button)}")
+        trace_action(f"{item.tag} 더보기 버튼: {self._describe_locator(more_button)}")
         more_button.click(timeout=5000)
         time.sleep(0.5)
         menu_item = self._find_download_menu_item(page)
         if menu_item is None:
             raise RuntimeError("더보기 메뉴에서 다운로드 항목을 찾지 못했습니다.")
         log(f"🎬 메뉴 다운로드 항목: {self._describe_locator(menu_item)}")
+        trace_action(f"{item.tag} 메뉴 다운로드 항목: {self._describe_locator(menu_item)}")
         with page.expect_download(timeout=12000) as download_info:
             menu_item.click(timeout=5000)
         download = download_info.value
@@ -1738,6 +1830,7 @@ class GrokAutomationEngine:
         target = download_dir / f"@{item.tag}{ext}"
         target = self._unique_path(target)
         download.save_as(str(target))
+        trace_action(f"{item.tag} 메뉴 다운로드 성공 -> {target.name}")
         self._dismiss_browser_download_panel(page, log)
         return target
 
@@ -1747,8 +1840,6 @@ class GrokAutomationEngine:
             time.sleep(0.12)
             page.keyboard.press("Escape")
             time.sleep(0.12)
-            viewport = page.viewport_size or {"width": 1440, "height": 940}
-            page.mouse.click(float(viewport["width"]) * 0.5, float(viewport["height"]) * 0.5)
             if log is not None:
                 log("🧹 다운로드 패널 닫기 시도")
         except Exception:
@@ -1770,7 +1861,7 @@ class GrokAutomationEngine:
         return candidate
 
     def _collect_right_toolbar_buttons(self, page, include_disabled: bool = False) -> list[tuple[float, object]]:
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         toolbar_candidates = []
         for selector in ("button", "[role='button']"):
             try:
@@ -1865,7 +1956,7 @@ class GrokAutomationEngine:
         return True
 
     def _open_latest_result_card(self, page) -> None:
-        viewport = page.viewport_size or {"width": 1440, "height": 940}
+        viewport = self._viewport_size(page)
         best = None
         best_score = -1.0
         for selector in ("img", "[role='img']", "button", "[role='button']"):

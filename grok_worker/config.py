@@ -41,6 +41,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "browser_profile_dir": f"{RUNTIME_DIR}/browser_profile_1",
     "browser_launch_mode": "edge_attach",
     "browser_attach_url": "http://127.0.0.1:9222",
+    "edge_window_inner_width": 968,
+    "edge_window_inner_height": 940,
+    "edge_window_left": 0,
+    "edge_window_top": 0,
+    "edge_window_lock_position": False,
     "media_mode": "image",
     "video_quality": "720p",
     "video_duration": "10s",
@@ -54,8 +59,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "window_geometry": "920x560",
     "lower_pane_sash": 460,
     "settings_collapsed": False,
+    "log_panel_visible": False,
     "grok_site_url": "https://grok.com/imagine",
 }
+
+
+def default_attach_profile_dir(attach_url: str) -> str:
+    raw = str(attach_url or "http://127.0.0.1:9222").strip()
+    try:
+        port = int(raw.rsplit(":", 1)[-1])
+    except Exception:
+        port = 9222
+    index = max(1, port - 9221)
+    if index == 1:
+        return f"{RUNTIME_DIR}/edge_attach_profile"
+    return f"{RUNTIME_DIR}/edge_attach_profile_{index}"
 
 
 def _merge_defaults(defaults: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
@@ -117,6 +135,9 @@ def load_config(base_dir: Path, config_name: str = CONFIG_FILE) -> dict[str, Any
         raw = {}
     cfg = _merge_defaults(DEFAULT_CONFIG, raw)
     cfg = _ensure_prompt_slots(base_dir, cfg)
+    browser_profile_dir = str(cfg.get("browser_profile_dir") or "").strip()
+    if (not browser_profile_dir) or browser_profile_dir == DEFAULT_CONFIG["browser_profile_dir"]:
+        cfg["browser_profile_dir"] = default_attach_profile_dir(str(cfg.get("browser_attach_url") or ""))
     if not cfg.get("download_output_dir"):
         cfg["download_output_dir"] = str((base_dir / DOWNLOADS_DIR).resolve())
     return cfg
