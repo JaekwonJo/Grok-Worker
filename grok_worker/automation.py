@@ -1681,7 +1681,7 @@ class GrokAutomationEngine:
         opened_result = False
         last_remaining = None
         last_candidate_signature = ""
-        started = time.time()
+        next_open_attempt_at = time.time() + 1.0
         while time.time() < deadline:
             if should_stop():
                 return None
@@ -1704,7 +1704,7 @@ class GrokAutomationEngine:
             if self._media_mode() == "video" and self._is_video_still_generating(page):
                 time.sleep(0.4)
                 continue
-            if (not opened_result) and (time.time() - started >= 1.0):
+            if time.time() >= next_open_attempt_at:
                 try:
                     set_status(f"{item_tag} 결과 카드 여는 중")
                     trace_action(f"{item_tag} 결과 카드 열기 시도")
@@ -1712,10 +1712,13 @@ class GrokAutomationEngine:
                     self._dismiss_feedback_popup(page, log)
                     opened_result = True
                     trace_action(f"{item_tag} 결과 카드 열기 성공")
+                    next_open_attempt_at = time.time() + 4.0
                     time.sleep(0.6)
                     continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if not opened_result:
+                        trace_action(f"{item_tag} 결과 카드 열기 실패: {exc}")
+                    next_open_attempt_at = time.time() + (2.0 if self._media_mode() == "video" else 3.0)
             time.sleep(0.4)
         return []
 
@@ -1855,10 +1858,7 @@ class GrokAutomationEngine:
                 if require_enabled and not self._locator_is_enabled(loc):
                     continue
                 return loc
-        candidate = toolbar_candidates[-1][1]
-        if require_enabled and not self._locator_is_enabled(candidate):
-            return None
-        return candidate
+        return None
 
     def _collect_right_toolbar_buttons(self, page, include_disabled: bool = False) -> list[tuple[float, object]]:
         viewport = self._viewport_size(page)
@@ -1912,10 +1912,13 @@ class GrokAutomationEngine:
             aria = (locator.get_attribute("aria-label") or "").strip().lower()
         except Exception:
             aria = ""
-        return ("추가 옵션" in text) or ("추가 옵션" in aria) or ("more" in text) or ("more" in aria)
+        return ("추가 옵션" in text) or ("추가 옵션" in aria) or ("더보기" in text) or ("더보기" in aria) or ("more" in text) or ("more" in aria)
 
     def _find_download_menu_item(self, page):
-        for selector in ("button", "[role='menuitem']", "[role='button']", "div", "span"):
+        viewport = self._viewport_size(page)
+        best = None
+        best_score = -1.0
+        for selector in ("button", "[role='menuitem']", "[role='button']"):
             try:
                 count = min(page.locator(selector).count(), 220)
             except Exception:
@@ -1925,15 +1928,31 @@ class GrokAutomationEngine:
                     loc = page.locator(selector).nth(idx)
                     if not loc.is_visible():
                         continue
+                    box = loc.bounding_box()
+                    if not box:
+                        continue
+                    if box["width"] > viewport["width"] * 0.65 or box["height"] > 90:
+                        continue
+                    if box["x"] < viewport["width"] * 0.45 or box["x"] > viewport["width"] * 0.98:
+                        continue
                     text = (loc.inner_text(timeout=100) or "").strip()
                     aria = (loc.get_attribute("aria-label") or "").strip()
                     lowered_text = text.lower()
                     lowered_aria = aria.lower()
                     if "다운로드" in text or "download" in lowered_text or "download" in lowered_aria:
-                        return loc
+                        score = 1000.0
+                        if selector == "[role='menuitem']":
+                            score += 400.0
+                        if "다운로드" in aria or "download" in lowered_aria:
+                            score += 200.0
+                        score -= float(box["width"]) * 0.2
+                        score -= float(box["height"]) * 0.5
+                        if score > best_score:
+                            best_score = score
+                            best = loc
                 except Exception:
                     continue
-        return None
+        return best
 
     def _locator_is_enabled(self, locator) -> bool:
         try:
