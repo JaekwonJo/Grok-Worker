@@ -2,8 +2,22 @@
 
 먼저 아래 문서부터 읽어:
 1. README.md
-2. docs/Grok_Worker_기획서.md
+2. docs/Grok_Worker_실사용_매뉴얼.md
 3. docs/CODEX_인수인계.md
+4. docs/Grok_Worker_기획서.md
+
+아래 규칙은 반드시 먼저 지켜:
+- `3_open_edge_for_grok.cmd`, `4_open_edge_for_worker2.cmd`, `7_open_edge_for_worker3.cmd` 같은 Edge 실행 파일은 아주 자주 깨지는 구간이다.
+- 이 프로젝트 폴더 경로에는 공백(`Grok Worker`)이 있으므로, 실행 파일/배치/VBS/python 런처 수정 때 인자 quoting 실수가 매우 잘 난다.
+- 위 실행 파일을 수정했다면 말로만 끝내지 말고, 반드시 실제로 더블클릭 또는 `cmd /c call ...` 방식으로 직접 실행 테스트를 하고, Edge 창이 실제로 뜨는지 확인한 뒤에만 사용자에게 넘겨라.
+- `start "" python ...`처럼 공백 경로에서 인자 분리 위험이 있는 방식은 특히 조심하고, 수정 후 워커1/워커2 둘 다 반드시 재검증해라.
+- 잘 되던 실행 파일을 함부로 구조 변경하지 말고, 꼭 필요한 최소 수정만 해라.
+- 현재 사용자가 실제로 쓰는 기준은 `standalone Grok Worker + 기존 Edge 연결`이다. 예전 `extension/` 설명만 보고 현재 상태를 잘못 이해하면 안 된다.
+- `extension/` 폴더는 현재 폐기 예정으로 본다. 다음 Codex는 확장 프로그램을 실사용 본체처럼 다루지 말고, standalone `Grok Worker`만 기준으로 작업해라.
+- 프롬프트 파일 정보 표시도 범위형이 아니라 실제 번호 목록 기준으로 이해해라. 예: `045,046,049,050,080`
+- UI 요구도 대충 비슷하게 처리하면 안 된다.
+  - 예: `로그 숨기기`는 “조금만 보이게”가 아니라 **완전히 안 보이게**여야 한다.
+  - 이런 요구는 사용자가 바로 눈으로 확인하므로, 임시 우회 말고 정확한 구현으로 끝내라.
 
 현재 프로젝트는 Flow Classic Plus와 별개인 Grok Imagine 전용 이미지 워커다.
 

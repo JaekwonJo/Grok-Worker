@@ -143,7 +143,8 @@ def summarize_prompt_file(
     items = load_prompt_blocks(path, prefix=prefix, pad_width=pad_width, separator=separator)
     if not items:
         return f"{path.name} | 프롬프트 없음"
-    return f"{path.name} | 총 {len(items)}개 | {items[0].number:03d}~{items[-1].number:03d}"
+    number_text = ",".join(f"{item.number:03d}" for item in items)
+    return f"{path.name} | 총 {len(items)}개 | {number_text}"
 
 
 def compress_numbers(numbers: Iterable[int], prefix: str = "") -> str:

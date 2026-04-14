@@ -1,41 +1,35 @@
 # Grok Worker Codex 인수인계
 
+## 2026-04-13 현재 실제 운영 기준
+
+가장 중요한 사실부터 적는다.
+
+- 지금 사용자가 실제로 돌리는 것은 **standalone `Grok Worker`**다.
+- 다음 Codex는 예전 확장 프로그램 문서만 보고 `extension/`이 현재 본체라고 단정하면 안 된다.
+- `extension/` 폴더는 현재 **폐기 예정**이다. 참고 흔적은 남아 있어도 실사용/주개발 대상으로 취급하지 않는다.
+- 프롬프트 파일 요약/번호 표시도 standalone 기준으로 본다. `S045>S046 Prompt`는 시작 번호 `045`로 읽고, 파일 정보도 `045,046,049...` 같은 실제 번호 목록 표시가 맞다.
+- 현재 실제 작업 기준 파일:
+  - `main.py`
+  - `grok_worker/automation.py`
+  - `grok_worker/ui.py`
+  - `grok_worker/browser.py`
+  - `edge_launcher.py`
+  - `grok_worker/windowing.py`
+
+## 다음 Codex가 맨 먼저 이해해야 할 것
+
+1. 사용자는 지금 Edge를 직접 열고 로그인한 뒤 워커가 붙는 방식을 쓴다.
+2. 워커1/워커2 실행 파일은 절대 가볍게 건드리면 안 된다.
+3. 실행 파일 수정 후에는 반드시 실제 실행 테스트를 한다.
+4. 로그 숨기기는 “좁히기”가 아니라 “완전히 안 보이게”가 맞다.
+5. 이 요구는 대충 처리하면 안 된다. 로그 패널은 진짜 레이아웃에서 빠져야 한다.
+5. 다음 번호로 넘어가기 직전 UI 오탐 때문에 전체 실행이 끊기지 않도록, 설정 버튼 실패는 경고 후 계속 진행하는 쪽이 안전하다.
+
 ## 현재 상태
 
-- 2026-04-09: 방향 전환 완료
-- standalone `Tkinter + Playwright` Grok Worker는 **보관용**
-- 실제 개발 축은 `extension/` 폴더의 **브라우저 확장 프로그램**
-
-## 왜 방향을 바꿨는가
-
-- manual 브라우저에서는 `grok.com/imagine` 접속 가능
-- 하지만 Playwright로 띄운 Chrome / Edge는 둘 다 Cloudflare `Sorry, you have been blocked`에 걸림
-- 즉 standalone 자동화 브라우저 방식은 구조적으로 막힐 가능성이 매우 큼
-- 그래서 사용자의 실제 브라우저 탭 안에서 동작하는 확장 프로그램으로 변경
-
-## 현재 구현됨
-
-- `extension/manifest.json`
-- `extension/sidepanel.html`
-- `extension/sidepanel.css`
-- `extension/sidepanel.js`
-- `extension/background.js`
-- `extension/content.js`
-- `extension/lib/prompt-parser.js`
-- `extension/lib/ref-db.js`
-
-## 현재 확장 프로그램 기능
-
-- 사이드패널 UI
-- 프롬프트 텍스트 입력 / `.txt` 불러오기
-- `001 : 본문 |||` 파서
-- `@S999`, `@S998` 같은 이름형 레퍼런스 토큰 파싱
-- IndexedDB 기반 레퍼런스 이름 메모
-- 연속 / 개별 번호 실행 선택
-- 현재 Grok 탭 줌 80% 기본 적용 (`chrome.tabs.setZoom`)
-- 현재 Grok 탭을 대상으로 background -> content 실행 메시지 전달
-- 미리 올린 이미지 검색/선택 / 프롬프트 입력 / 화살표 제출 / 다운로드 버튼 탐색 1차 연결
-- 다운로드 파일명은 `chrome.downloads.onDeterminingFilename`으로 제안
+- 2026-04-13 이후 실사용 기준은 다시 **standalone `Grok Worker` 고정**
+- `extension/`은 실험/참고 흔적이며 **폐기 예정**
+- 다음 Codex는 확장 프로그램 구현 목록보다 standalone 동작을 먼저 읽고 판단해야 함
 
 ## 현재 프롬프트 규칙
 
@@ -53,8 +47,17 @@
 ## 지금 꼭 알아둘 점
 
 - 아직 `완성품`은 아님
-- 현재 자동화는 1차 DOM 휴리스틱 버전
-- Grok UI가 바뀌면 `content.js`의 탐색기부터 다시 맞춰야 함
+- 현재 자동화는 standalone 기준 DOM 휴리스틱 버전
+- Grok UI가 바뀌면 `grok_worker/automation.py` 쪽 탐색기부터 다시 맞추는 것이 우선이다
+- **매우 중요:** `3_open_edge_for_grok.cmd`, `4_open_edge_for_worker2.cmd`, `7_open_edge_for_worker3.cmd` 실행 파일은 절대 가볍게 건드리면 안 됨
+- 이 프로젝트 폴더 경로에는 `Grok Worker`처럼 공백이 들어 있으므로, Windows CMD/VBS/python 런처 인자 전달이 아주 쉽게 깨짐
+- 실행 파일을 수정했다면 반드시 실제로 직접 실행 테스트를 해야 함
+  - 워커1: `3_open_edge_for_grok.cmd`
+  - 워커2: `4_open_edge_for_worker2.cmd`
+  - 필요 시 워커3: `7_open_edge_for_worker3.cmd`
+- 단순 문법 검사나 `python edge_launcher.py --help` 같은 테스트만으로는 부족함
+- 실제 기준은 `더블클릭 또는 cmd /c call` 후 Edge 창이 진짜 떠야 통과임
+- `start "" python ...` 형태, 상대경로 `edge_launcher.py` 호출, 공백 경로 미인용은 특히 재발 위험이 큼
 - 특히:
   - `+` 버튼
   - 파일 입력칸
@@ -65,11 +68,11 @@
 
 ## 다음 구현 순서
 
-1. 사이드패널 UI 더 컴팩트하게 정리
+1. standalone 워커 UI/자동화 안정화
 2. Grok에 미리 올린 이미지 검색/선택이 실제로 붙는지 실사용 확인
 3. 제출 뒤 결과 카드 선택 안정화
 4. 다운로드 완료 검증 / 실패 재시도 / 실패 번호 복붙 고도화
-5. 필요 시 `@S999` 토큰을 유지할지, `S999`만 남길지 사용자 테스트 후 조정
+5. 필요 시 `@S999` 토큰 처리 규칙 추가 보강
 
 ## 보관용 파일
 
@@ -104,3 +107,11 @@
 - 2026-04-12: standalone `Grok Worker`는 이제 실행 직후 연결 Edge를 자동으로 띄우고, 프로그램 종료 시 같은 디버그 포트 Edge도 같이 닫도록 보강. `browser.py`가 `--remote-debugging-port` 포트를 보고 Edge를 자동 실행/정리함
 - 2026-04-12: standalone `Grok Worker`에 `이미지 / 비디오` 작업 모드를 추가. 비디오 모드에서는 `720p / 10s / 16:9` 같은 생성 옵션을 프롬프트 입력 전에 자동으로 맞추도록 보강
 - 2026-04-12: 위 자동 Edge 실행/종료는 실제 로그인 차단 문제가 있어 다시 철회. 현재 원칙은 `사람이 먼저 Edge를 직접 열고 로그인 -> 워커가 connect_over_cdp로 붙기`이며, 병렬 실행도 `parallel_launcher.py`가 Edge는 건드리지 않고 워커 창만 여는 쪽으로 수정
+- 2026-04-13: Edge 실행 파일 안정성 재강조. `3_open_edge_for_grok.cmd` / `4_open_edge_for_worker2.cmd`를 python 래퍼 방식으로 바꿀 때 공백 경로 quoting 때문에 실제 Edge가 안 뜨는 사고가 재발함. 앞으로는 실행 파일 수정 후 반드시 실제 실행 테스트를 먼저 하고, `잘 되던 start msedge 흐름`은 최소 수정 원칙으로 유지해야 함
+- 2026-04-13: `edge_launcher.py`를 추가해 Edge 창 위치/크기 재사용을 보조. 다만 위치는 자유, 크기만 작업용으로 맞추는 것이 현재 원칙
+- 2026-04-13: 다운로드 버튼 탐지는 연결된 Edge의 실제 viewport 기준으로 다시 계산하도록 보강. 좁은 창(내부 968px 기준)에서도 다운로드 버튼을 더 안정적으로 찾도록 수정
+- 2026-04-13: 다운로드 뒤 중앙 클릭을 제거해, 방금 저장한 이미지/영상 앞 화면이 다시 눌리거나 선택되는 문제를 줄임
+- 2026-04-13: `현재 상태` 초 표시를 Flow Classic Plus처럼 실시간 카운트다운으로 보강
+- 2026-04-13: 대기열 우선 UI로 조정. 로그 패널은 기본 숨김이며 `로그 보기` 눌렀을 때만 보여야 함
+- 2026-04-13: 로그 패널 숨김 요구는 “거의 안 보이게”가 아니라 “완전히 제거”가 맞다. 다음 Codex는 PanedWindow 폭만 줄이는 식으로 대충 처리하지 말고, 실제로 레이아웃에서 빠지게 구현해야 함
+- 2026-04-13: 다음 번호로 넘어가기 직전 `absolute bottom-2 right-2 ...` 같은 보이지 않는 div 컨테이너를 모드/비율 버튼으로 잘못 잡아 전체 실행이 끊기던 문제가 있었음. 현재는 모드/비율 버튼 클릭 실패 시 전체 중단 대신 경고 후 계속 진행하게 보강
