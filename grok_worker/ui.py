@@ -304,7 +304,16 @@ class GrokWorkerApp:
         self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
         self._action_button(prompt_btns, "삭제", self.delete_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=2, sticky="ew", padx=6)
         self._action_button(prompt_btns, "추가", self.add_prompt_file, self._bg("open_btn_bg"), small=True, width=6).grid(row=0, column=3, sticky="ew", padx=(6, 0))
-        tk.Label(parent, textvariable=self.prompt_file_summary_var, bg=self._bg("settings_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 9)).pack(anchor="w", padx=4, pady=(0, 8))
+        tk.Label(
+            parent,
+            textvariable=self.prompt_file_summary_var,
+            bg=self._bg("settings_bg"),
+            fg=self._bg("sub_fg"),
+            font=("Malgun Gothic", 9),
+            justify="left",
+            anchor="nw",
+            height=3,
+        ).pack(fill="x", anchor="w", padx=4, pady=(0, 8))
 
         self._path_row(parent, "저장 폴더", self.download_dir_var, self.choose_download_dir)
         attach_note = tk.Frame(parent, bg=self._bg("settings_bg"))
@@ -659,6 +668,36 @@ class GrokWorkerApp:
             except Exception:
                 pass
 
+    def _format_prompt_summary_for_ui(self, summary: str, *, max_lines: int = 3, max_chars: int = 92) -> str:
+        raw = str(summary or "").strip()
+        if not raw:
+            return ""
+        parts = [part.strip() for part in raw.split("|")]
+        if len(parts) < 3:
+            if len(raw) <= max_chars * max_lines:
+                return raw
+            return raw[: max_chars * max_lines - 3].rstrip(", ") + "..."
+        head = " | ".join(parts[:2]).strip()
+        numbers = [token.strip() for token in parts[2].split(",") if token.strip()]
+        lines: list[str] = []
+        current = f"{head} | "
+        current_limit = max_chars
+        for token in numbers:
+            piece = token if current.endswith("| ") else f",{token}"
+            if len(current) + len(piece) <= current_limit:
+                current += piece
+                continue
+            lines.append(current.rstrip(", "))
+            if len(lines) >= max_lines:
+                lines[-1] = lines[-1].rstrip(", ") + "..."
+                return "\n".join(lines)
+            current = token
+        lines.append(current.rstrip(", "))
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            lines[-1] = lines[-1].rstrip(", ") + "..."
+        return "\n".join(lines)
+
     def refresh_summary_only(self) -> None:
         attach_url = str(self.cfg.get("browser_attach_url") or "http://127.0.0.1:9222").strip()
         media_label = "비디오" if str(self.cfg.get("media_mode") or "image") == "video" else "이미지"
@@ -670,14 +709,13 @@ class GrokWorkerApp:
         if slots:
             slot_file = str((slots[slot_idx] or {}).get("file") or "")
             slot_path = self.base_dir / slot_file
-            self.prompt_file_summary_var.set(
-                summarize_prompt_file(
-                    slot_path,
-                    prefix=str(self.cfg.get("prompt_prefix") or "S"),
-                    pad_width=int(self.cfg.get("prompt_pad_width", 3) or 3),
-                    separator=str(self.cfg.get("prompt_separator") or "|||"),
-                )
+            summary = summarize_prompt_file(
+                slot_path,
+                prefix=str(self.cfg.get("prompt_prefix") or "S"),
+                pad_width=int(self.cfg.get("prompt_pad_width", 3) or 3),
+                separator=str(self.cfg.get("prompt_separator") or "|||"),
             )
+            self.prompt_file_summary_var.set(self._format_prompt_summary_for_ui(summary))
         self._refresh_queue_summary()
         self._refresh_progress_display()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
