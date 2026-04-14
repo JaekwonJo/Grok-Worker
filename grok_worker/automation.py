@@ -353,6 +353,27 @@ class GrokAutomationEngine:
             return f"비디오 | {self._video_quality()} | {self._video_duration()} | {self._aspect_ratio()}"
         return f"이미지 | {self._aspect_ratio()}"
 
+    def _download_probe_policy(self, timeout_seconds: float) -> dict[str, float]:
+        timeout_seconds = max(0.5, float(timeout_seconds or 0.5))
+        media_mode = self._media_mode()
+        if media_mode == "video":
+            if timeout_seconds >= 150.0:
+                probe_start_delay = 120.0
+            else:
+                probe_start_delay = max(10.0, timeout_seconds * 0.65)
+            probe_start_delay = min(probe_start_delay, max(1.0, timeout_seconds - 1.0))
+            return {
+                "start_delay": probe_start_delay,
+                "probe_interval": 2.0,
+                "reopen_interval": 8.0,
+            }
+        probe_start_delay = min(5.0, max(0.5, timeout_seconds - 0.5))
+        return {
+            "start_delay": probe_start_delay,
+            "probe_interval": 0.8,
+            "reopen_interval": 3.0,
+        }
+
     def _browser_launch_mode(self) -> str:
         return str(self.cfg.get("browser_launch_mode") or "managed").strip().lower() or "managed"
 
@@ -1678,10 +1699,18 @@ class GrokAutomationEngine:
         timeout_seconds: float,
     ) -> list:
         deadline = time.time() + max(0.5, timeout_seconds)
+        probe_policy = self._download_probe_policy(timeout_seconds)
+        probe_after = time.time() + probe_policy["start_delay"]
+        probe_interval = max(0.2, probe_policy["probe_interval"])
+        reopen_interval = max(1.0, probe_policy["reopen_interval"])
         opened_result = False
         last_remaining = None
         last_candidate_signature = ""
-        next_open_attempt_at = time.time() + 1.0
+        next_open_attempt_at = probe_after
+        trace_action(
+            f"{item_tag} 다운로드 스캔 정책 | 모드={self._media_mode()} | "
+            f"시작지연={probe_policy['start_delay']:.1f}초 | 간격={probe_interval:.1f}초 | 결과카드재시도={reopen_interval:.1f}초"
+        )
         while time.time() < deadline:
             if should_stop():
                 return None
@@ -1690,10 +1719,19 @@ class GrokAutomationEngine:
             remaining = max(0, int(math.ceil(deadline - time.time())))
             if remaining != last_remaining:
                 last_remaining = remaining
-                if self._media_mode() == "video":
+                if time.time() < probe_after:
+                    probe_wait = max(0, int(math.ceil(probe_after - time.time())))
+                    if self._media_mode() == "video":
+                        set_status(f"{item_tag} 비디오 생성 대기 {probe_wait}초")
+                    else:
+                        set_status(f"{item_tag} 생성 대기 {probe_wait}초")
+                elif self._media_mode() == "video":
                     set_status(f"{item_tag} 비디오 생성 확인 {remaining}초")
                 else:
                     set_status(f"{item_tag} 생성 대기 {remaining}초")
+            if time.time() < probe_after:
+                time.sleep(min(probe_interval, max(0.2, probe_after - time.time())))
+                continue
             buttons = self._locate_download_buttons(page)
             if buttons:
                 signature = " | ".join(self._describe_locator(button) for button in buttons[:6])
@@ -1702,7 +1740,7 @@ class GrokAutomationEngine:
                     last_candidate_signature = signature
                 return buttons
             if self._media_mode() == "video" and self._is_video_still_generating(page):
-                time.sleep(0.4)
+                time.sleep(probe_interval)
                 continue
             if time.time() >= next_open_attempt_at:
                 try:
@@ -1712,14 +1750,14 @@ class GrokAutomationEngine:
                     self._dismiss_feedback_popup(page, log)
                     opened_result = True
                     trace_action(f"{item_tag} 결과 카드 열기 성공")
-                    next_open_attempt_at = time.time() + 4.0
+                    next_open_attempt_at = time.time() + reopen_interval
                     time.sleep(0.6)
                     continue
                 except Exception as exc:
                     if not opened_result:
                         trace_action(f"{item_tag} 결과 카드 열기 실패: {exc}")
-                    next_open_attempt_at = time.time() + (2.0 if self._media_mode() == "video" else 3.0)
-            time.sleep(0.4)
+                    next_open_attempt_at = time.time() + reopen_interval
+            time.sleep(probe_interval)
         return []
 
     def _locate_download_buttons(self, page) -> list:
