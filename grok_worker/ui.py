@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, simpledialog
 from .automation import GrokAutomationEngine
 from .browser import BrowserManager
 from .config import CONFIG_FILE, DEFAULT_CONFIG, LOGS_DIR, default_attach_profile_dir, next_prompt_slot_file, save_config, load_config
-from .prompt_parser import compress_numbers, summarize_prompt_file
+from .prompt_parser import compress_numbers, load_prompt_blocks, summarize_prompt_file
 from .queue_state import QueueItem
 
 
@@ -304,8 +304,10 @@ class GrokWorkerApp:
         self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
         self._action_button(prompt_btns, "삭제", self.delete_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=2, sticky="ew", padx=6)
         self._action_button(prompt_btns, "추가", self.add_prompt_file, self._bg("open_btn_bg"), small=True, width=6).grid(row=0, column=3, sticky="ew", padx=(6, 0))
+        prompt_summary_row = tk.Frame(parent, bg=self._bg("settings_bg"))
+        prompt_summary_row.pack(fill="x", padx=4, pady=(0, 8))
         tk.Label(
-            parent,
+            prompt_summary_row,
             textvariable=self.prompt_file_summary_var,
             bg=self._bg("settings_bg"),
             fg=self._bg("sub_fg"),
@@ -313,7 +315,8 @@ class GrokWorkerApp:
             justify="left",
             anchor="nw",
             height=3,
-        ).pack(fill="x", anchor="w", padx=4, pady=(0, 8))
+        ).pack(side="left", fill="x", expand=True, anchor="w")
+        self._action_button(prompt_summary_row, "번호복사", self.copy_prompt_numbers, self._bg("open_btn_bg"), small=True, width=8).pack(side="right", padx=(8, 0), anchor="n")
 
         self._path_row(parent, "저장 폴더", self.download_dir_var, self.choose_download_dir)
         attach_note = tk.Frame(parent, bg=self._bg("settings_bg"))
@@ -883,6 +886,23 @@ class GrokWorkerApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
         self.log(f"실패 번호 복사: {text or '(없음)'}")
+
+    def copy_prompt_numbers(self) -> None:
+        slot = self._current_prompt_slot()
+        path = self.base_dir / str((slot or {}).get("file") or "")
+        items = load_prompt_blocks(
+            path,
+            prefix=str(self.cfg.get("prompt_prefix") or "S"),
+            pad_width=int(self.cfg.get("prompt_pad_width", 3) or 3),
+            separator=str(self.cfg.get("prompt_separator") or "|||"),
+        )
+        text = ",".join(f"{item.number:03d}" for item in items)
+        if not text:
+            messagebox.showwarning("번호 복사", "복사할 번호가 없습니다.", parent=self.root)
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.log(f"프롬프트 번호 복사: {text}")
 
     def _render_queue(self) -> None:
         for child in self.queue_inner.winfo_children():
