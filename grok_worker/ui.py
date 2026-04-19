@@ -57,6 +57,7 @@ class GrokWorkerApp:
         self._status_countdown_after_id: str | None = None
         self._status_countdown_deadline: float | None = None
         self._status_countdown_prefix: str | None = None
+        self._resize_drag_origin: tuple[int, int, int, int] | None = None
 
         self.root = tk.Tk()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
@@ -290,7 +291,41 @@ class GrokWorkerApp:
         self.log_text = tk.Text(log_frame, height=6, bg=self._bg("log_text_bg"), fg=self._bg("log_text_fg"), insertbackground="#ffffff", relief="solid", borderwidth=1)
         self.log_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.log_text.configure(state="disabled")
+
+        resize_bar = tk.Frame(root, bg=self._bg("root_bg"))
+        resize_bar.pack(fill="x", padx=10, pady=(0, 10))
+        tk.Label(resize_bar, text="창 크기 조절", bg=self._bg("root_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 8)).pack(side="right", padx=(0, 6))
+        resize_handle = tk.Frame(
+            resize_bar,
+            bg=self._bg("small_btn_bg"),
+            width=36,
+            height=22,
+            cursor="size_nw_se",
+            highlightbackground=self._bg("top_left_border"),
+            highlightthickness=1,
+        )
+        resize_handle.pack(side="right")
+        resize_handle.pack_propagate(False)
+        tk.Label(resize_handle, text="◢", bg=self._bg("small_btn_bg"), fg="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(expand=True)
+        resize_handle.bind("<ButtonPress-1>", self._start_resize_drag)
+        resize_handle.bind("<B1-Motion>", self._on_resize_drag)
+        resize_handle.bind("<ButtonRelease-1>", self._end_resize_drag)
         self.root.after(120, self._apply_log_panel_visibility)
+
+    def _start_resize_drag(self, event) -> None:
+        self._resize_drag_origin = (event.x_root, event.y_root, self.root.winfo_width(), self.root.winfo_height())
+
+    def _on_resize_drag(self, event) -> None:
+        if not self._resize_drag_origin:
+            return
+        start_x, start_y, start_w, start_h = self._resize_drag_origin
+        min_w, min_h = 820, 520
+        new_w = max(min_w, start_w + (event.x_root - start_x))
+        new_h = max(min_h, start_h + (event.y_root - start_y))
+        self.root.geometry(f"{new_w}x{new_h}")
+
+    def _end_resize_drag(self, _event=None) -> None:
+        self._resize_drag_origin = None
 
     def _build_basic_settings(self, parent: tk.Frame) -> None:
         tk.Label(parent, text="기본 설정", bg=self._bg("settings_bg"), fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
