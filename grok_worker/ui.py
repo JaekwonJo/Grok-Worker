@@ -717,6 +717,7 @@ class GrokWorkerApp:
                 prefix=str(self.cfg.get("prompt_prefix") or "S"),
                 pad_width=int(self.cfg.get("prompt_pad_width", 3) or 3),
                 separator=str(self.cfg.get("prompt_separator") or "|||"),
+                extra_prefixes=("V",) if str(self.cfg.get("media_mode") or "image") == "video" else (),
             )
             self.prompt_file_summary_var.set(self._format_prompt_summary_for_ui(summary))
         self._refresh_queue_summary()
@@ -895,6 +896,7 @@ class GrokWorkerApp:
             prefix=str(self.cfg.get("prompt_prefix") or "S"),
             pad_width=int(self.cfg.get("prompt_pad_width", 3) or 3),
             separator=str(self.cfg.get("prompt_separator") or "|||"),
+            extra_prefixes=("V",) if str(self.cfg.get("media_mode") or "image") == "video" else (),
         )
         text = ",".join(f"{item.number:03d}" for item in items)
         if not text:

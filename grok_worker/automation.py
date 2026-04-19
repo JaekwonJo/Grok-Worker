@@ -50,6 +50,7 @@ class GrokAutomationEngine:
             prefix=str(self.cfg.get("prompt_prefix") or "S"),
             pad_width=int(self.cfg.get("prompt_pad_width", 3) or 3),
             separator=str(self.cfg.get("prompt_separator") or "|||"),
+            extra_prefixes=("V",) if self._media_mode() == "video" else (),
         )
         selected = self._filter_items(items)
         summary = self._selection_summary(selected)

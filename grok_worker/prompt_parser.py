@@ -32,6 +32,17 @@ def _render_prompt(prefix: str, number: int, pad_width: int, body: str) -> tuple
     return tag, f"{tag} Prompt : {body_text}"
 
 
+def _normalize_prefix_aliases(prefix: str, extra_prefixes: Iterable[str] = ()) -> tuple[str, ...]:
+    aliases: list[str] = []
+    for token in (prefix, *(extra_prefixes or ())):
+        normalized = str(token or "").strip().upper()
+        if normalized and normalized not in aliases:
+            aliases.append(normalized)
+    if not aliases:
+        aliases.append("S")
+    return tuple(aliases)
+
+
 def _normalize_prompt_chunk(chunk: str) -> str:
     lines = [line.rstrip() for line in str(chunk or "").splitlines()]
     return "\n".join(lines).strip()
@@ -43,7 +54,10 @@ def parse_prompt_blocks(
     prefix: str = "S",
     pad_width: int = 3,
     separator: str = "|||",
+    extra_prefixes: Iterable[str] = (),
 ) -> list[PromptBlock]:
+    prefix_aliases = _normalize_prefix_aliases(prefix, extra_prefixes)
+    prefix_pattern = "|".join(re.escape(token) for token in prefix_aliases)
     chunks = [part.strip() for part in str(raw_text or "").split(separator) if part.strip()]
     items: list[PromptBlock] = []
     for chunk in chunks:
@@ -60,13 +74,17 @@ def parse_prompt_blocks(
         rendered = normalized_chunk
 
         labeled_match = re.match(
-            rf"^\s*({re.escape(prefix)}\s*0*([1-9][0-9]*))(?:\s*>\s*({re.escape(prefix)}\s*0*([1-9][0-9]*)))?\s*(?:PROMPT|프롬프트)\s*:\s*(.*)\s*$",
+            rf"^\s*(((?:{prefix_pattern})\s*0*([1-9][0-9]*))(?:\s*>\s*(?:{prefix_pattern})\s*0*([1-9][0-9]*))?)\s*(?:PROMPT|프롬프트)\s*:\s*(.*)\s*$",
             first_line,
             re.IGNORECASE | re.DOTALL,
         )
         if labeled_match:
-            number = int(labeled_match.group(2))
-            tag = f"{prefix}{str(number).zfill(max(3, int(pad_width or 3)))}"
+            number = int(labeled_match.group(3))
+            prompt_spec = str(labeled_match.group(1) or "").strip()
+            tag_head = prompt_spec.split(">", 1)[0].strip()
+            prefix_match = re.match(r"^\s*([A-Za-z]+)", tag_head)
+            display_prefix = str(prefix_match.group(1) or prefix).strip().upper() if prefix_match else str(prefix or "S").strip().upper()
+            tag = f"{display_prefix}{str(number).zfill(max(3, int(pad_width or 3)))}"
             inline_body = str(labeled_match.group(5) or "").strip()
             body_parts = []
             if inline_body:
@@ -74,7 +92,7 @@ def parse_prompt_blocks(
             if rest_lines:
                 body_parts.append("\n".join(rest_lines).strip())
             body = _normalize_body("\n".join(part for part in body_parts if part.strip()))
-            rendered = f"{tag} Prompt : {body}"
+            rendered = f"{prompt_spec.upper()} Prompt : {body}"
         else:
             inline_match = re.match(r"^\s*0*([1-9][0-9]*)\s*:\s*(.*)\s*$", first_line, re.DOTALL)
             if inline_match:
@@ -126,11 +144,12 @@ def load_prompt_blocks(
     prefix: str = "S",
     pad_width: int = 3,
     separator: str = "|||",
+    extra_prefixes: Iterable[str] = (),
 ) -> list[PromptBlock]:
     if not path.exists():
         return []
     raw = path.read_text(encoding="utf-8")
-    return parse_prompt_blocks(raw, prefix=prefix, pad_width=pad_width, separator=separator)
+    return parse_prompt_blocks(raw, prefix=prefix, pad_width=pad_width, separator=separator, extra_prefixes=extra_prefixes)
 
 
 def summarize_prompt_file(
@@ -139,8 +158,9 @@ def summarize_prompt_file(
     prefix: str = "S",
     pad_width: int = 3,
     separator: str = "|||",
+    extra_prefixes: Iterable[str] = (),
 ) -> str:
-    items = load_prompt_blocks(path, prefix=prefix, pad_width=pad_width, separator=separator)
+    items = load_prompt_blocks(path, prefix=prefix, pad_width=pad_width, separator=separator, extra_prefixes=extra_prefixes)
     if not items:
         return f"{path.name} | 프롬프트 없음"
     number_text = ",".join(f"{item.number:03d}" for item in items)
