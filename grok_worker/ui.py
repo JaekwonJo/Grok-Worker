@@ -292,11 +292,16 @@ class GrokWorkerApp:
         self.log_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.log_text.configure(state="disabled")
 
-        resize_bar = tk.Frame(root, bg=self._bg("root_bg"))
-        resize_bar.pack(fill="x", padx=10, pady=(0, 10))
-        tk.Label(resize_bar, text="창 크기 조절", bg=self._bg("root_bg"), fg=self._bg("sub_fg"), font=("Malgun Gothic", 8)).pack(side="right", padx=(0, 6))
+        self.resize_hint_label = tk.Label(
+            root,
+            text="창 크기 조절",
+            bg=self._bg("root_bg"),
+            fg=self._bg("sub_fg"),
+            font=("Malgun Gothic", 8),
+        )
+        self.resize_hint_label.place(relx=1.0, rely=1.0, x=-48, y=-8, anchor="se")
         resize_handle = tk.Frame(
-            resize_bar,
+            root,
             bg=self._bg("small_btn_bg"),
             width=36,
             height=22,
@@ -304,9 +309,10 @@ class GrokWorkerApp:
             highlightbackground=self._bg("top_left_border"),
             highlightthickness=1,
         )
-        resize_handle.pack(side="right")
+        resize_handle.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor="se")
         resize_handle.pack_propagate(False)
         tk.Label(resize_handle, text="◢", bg=self._bg("small_btn_bg"), fg="#ffffff", font=("Malgun Gothic", 10, "bold")).pack(expand=True)
+        self.resize_handle = resize_handle
         resize_handle.bind("<ButtonPress-1>", self._start_resize_drag)
         resize_handle.bind("<B1-Motion>", self._on_resize_drag)
         resize_handle.bind("<ButtonRelease-1>", self._end_resize_drag)
