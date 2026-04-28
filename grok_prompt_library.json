@@ -1,0 +1,108 @@
+{
+  "prompt_slots": [
+    {
+      "name": "금성대군_1부",
+      "file": "prompts/grok_prompts_slot_1.txt"
+    },
+    {
+      "name": "비트코인_반감기",
+      "file": "prompts/grok_prompts_slot_3.txt"
+    },
+    {
+      "name": "마이크로소프트_사티아나델라_openAI",
+      "file": "prompts/grok_prompts_slot_7.txt"
+    },
+    {
+      "name": "0426_앤스로픽",
+      "file": "prompts/grok_prompts_slot_9.txt"
+    },
+    {
+      "name": "0428_메타",
+      "file": "prompts/grok_prompts_slot_11.txt"
+    },
+    {
+      "name": "0420_유대인1부",
+      "file": "prompts/grok_prompts_slot_12.txt"
+    },
+    {
+      "name": "원자재금은구리",
+      "file": "prompts/grok_prompts_slot_14.txt"
+    },
+    {
+      "name": "유대인_1부_수정",
+      "file": "prompts/grok_prompts_slot_16.txt"
+    },
+    {
+      "name": "유대인_완전다시_비디오80개",
+      "file": "prompts/grok_prompts_slot_19.txt"
+    },
+    {
+      "name": "애플_팀쿡",
+      "file": "prompts/grok_prompts_slot_20.txt"
+    },
+    {
+      "name": "마소_비디오",
+      "file": "prompts/grok_prompts_slot_22.txt"
+    },
+    {
+      "name": "0428_메타비디오",
+      "file": "prompts/grok_prompts_slot_23.txt"
+    },
+    {
+      "name": "0429_피터린치",
+      "file": "prompts/grok_prompts_slot_24.txt"
+    },
+    {
+      "name": "0429_피터린치비디오프롬프트",
+      "file": "prompts/grok_prompts_slot_26.txt"
+    },
+    {
+      "name": "주식좀요",
+      "file": "prompts/grok_prompts_slot_6.txt"
+    },
+    {
+      "name": "마이크로소프트_ChatGPT_오픈AI",
+      "file": "prompts/grok_prompts_slot_2.txt"
+    },
+    {
+      "name": "비트코인_반감기_비디오",
+      "file": "prompts/grok_prompts_slot_4.txt"
+    },
+    {
+      "name": "앤스로픽",
+      "file": "prompts/grok_prompts_slot_5.txt"
+    },
+    {
+      "name": "0428_메타_비디오",
+      "file": "prompts/grok_prompts_slot_8.txt"
+    },
+    {
+      "name": "탈세왕2부",
+      "file": "prompts/grok_prompts_slot_10.txt"
+    },
+    {
+      "name": "0420_유대인_비디오",
+      "file": "prompts/grok_prompts_slot_13.txt"
+    },
+    {
+      "name": "원자재. 금,은,구리",
+      "file": "prompts/grok_prompts_slot_15.txt"
+    },
+    {
+      "name": "유대인_1부_수정된거",
+      "file": "prompts/grok_prompts_slot_17.txt"
+    },
+    {
+      "name": "유대인완전다시",
+      "file": "prompts/grok_prompts_slot_18.txt"
+    },
+    {
+      "name": "애플_팀쿡",
+      "file": "prompts/grok_prompts_slot_21.txt"
+    },
+    {
+      "name": "0429_피터린치",
+      "file": "prompts/grok_prompts_slot_25.txt"
+    }
+  ]
+}

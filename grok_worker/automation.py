@@ -651,6 +651,98 @@ class GrokAutomationEngine:
         except Exception:
             return False
 
+    def _dismiss_preference_popup(self, page, log: LogFn | None = None) -> bool:
+        prompt_loc = None
+        for pattern in (
+            "어떤 영상",
+            "어떤 비디오",
+            "어떤 이미지",
+            "더 좋으신가요",
+            "더 좋아하시나요",
+            "피드백은",
+        ):
+            try:
+                loc = page.get_by_text(pattern, exact=False)
+                if loc.count() and loc.first.is_visible():
+                    prompt_loc = loc.first
+                    break
+            except Exception:
+                continue
+        if prompt_loc is None:
+            return False
+
+        # Skip is the least disruptive path. If Grok requires a choice, use one visible media card.
+        for pattern in ("건너뛰기", "Skip", "skip"):
+            try:
+                loc = page.get_by_text(pattern, exact=False)
+                if loc.count() and loc.first.is_visible():
+                    loc.first.click(timeout=3000)
+                    if log is not None:
+                        log(f"🧩 선호도 팝업 감지 -> 건너뛰기 클릭: {self._describe_locator(loc.first)}")
+                    time.sleep(0.4)
+                    return True
+            except Exception:
+                continue
+
+        try:
+            prompt_box = prompt_loc.bounding_box()
+        except Exception:
+            prompt_box = None
+        if not prompt_box:
+            return False
+
+        viewport = self._viewport_size(page)
+        best = None
+        best_score = -1.0
+        for selector in ("button", "[role='button']", "img", "video"):
+            try:
+                count = min(page.locator(selector).count(), 120)
+            except Exception:
+                continue
+            for idx in range(count):
+                try:
+                    loc = page.locator(selector).nth(idx)
+                    if not loc.is_visible():
+                        continue
+                    box = loc.bounding_box()
+                    if not box:
+                        continue
+                    if box["y"] < prompt_box["y"] + 45:
+                        continue
+                    if box["y"] > min(viewport["height"] * 0.85, prompt_box["y"] + 520):
+                        continue
+                    if box["width"] < 120 or box["height"] < 80:
+                        continue
+                    area = float(box["width"]) * float(box["height"])
+                    score = area - float(box["x"]) * 0.1
+                    if score > best_score:
+                        best_score = score
+                        best = loc
+                except Exception:
+                    continue
+        if best is None:
+            return False
+        try:
+            best.click(timeout=3000)
+            if log is not None:
+                log(f"🧩 선호도 팝업 감지 -> 후보 클릭: {self._describe_locator(best)}")
+            time.sleep(0.5)
+            return True
+        except Exception:
+            return False
+
+    def _dismiss_download_blocker_popup(self, page, log: LogFn | None = None) -> bool:
+        handled = False
+        for _ in range(3):
+            if self._dismiss_feedback_popup(page, log):
+                handled = True
+                continue
+            if self._dismiss_preference_popup(page, log):
+                handled = True
+                continue
+            break
+        return handled
+
     def _set_aspect_ratio(self, page, target: str) -> bool:
         target = str(target or "").strip()
         input_loc = self._find_prompt_input(page)
@@ -1573,6 +1665,16 @@ class GrokAutomationEngine:
             timeout_seconds=timeout_seconds,
         )
         if not download_buttons:
+            download_buttons = self._try_download_blocker_rescue(
+                page=page,
+                item_tag=item.tag,
+                log=log,
+                trace_action=trace_action,
+                set_status=set_status,
+                should_stop=should_stop,
+                wait_if_paused=wait_if_paused,
+            )
+        if not download_buttons:
             if self._media_mode() == "video":
                 try:
                     log("🎬 비디오 다운로드: 마지막 메뉴 경로 시도")
@@ -1617,6 +1719,40 @@ class GrokAutomationEngine:
                 log(f"⚠️ 비디오 메뉴 다운로드 실패: {exc}")
                 trace_action(f"{item.tag} 비디오 메뉴 다운로드 실패: {exc}")
         raise RuntimeError(str(last_error) if last_error else "다운로드 버튼 클릭 후 저장이 시작되지 않았습니다.")
+
+    def _try_download_blocker_rescue(
+        self,
+        *,
+        page,
+        item_tag: str,
+        log: LogFn,
+        trace_action: LogFn,
+        set_status: StatusFn,
+        should_stop: StopFn,
+        wait_if_paused: PauseFn,
+    ) -> list:
+        log("🧪 다운로드 버튼 미탐 -> 실패 직전 팝업/선호도 구조 시도")
+        trace_action(f"{item_tag} 실패 직전 구조 시도 시작")
+        set_status(f"{item_tag} 팝업 구조 확인")
+        handled = self._dismiss_download_blocker_popup(page, log)
+        if not handled:
+            log("🧪 실패 직전 구조 시도: 처리할 만족도/선호도 팝업 없음")
+            trace_action(f"{item_tag} 실패 직전 구조 시도: 팝업 없음")
+            return []
+
+        retry_seconds = 20.0
+        log(f"🧪 팝업 처리 후 다운로드 버튼 재확인 ({retry_seconds:.0f}초)")
+        trace_action(f"{item_tag} 팝업 처리 후 다운로드 재스캔 {retry_seconds:.0f}초")
+        return self._wait_for_download_button_or_open_result(
+            page=page,
+            item_tag=item_tag,
+            log=log,
+            trace_action=trace_action,
+            set_status=set_status,
+            should_stop=should_stop,
+            wait_if_paused=wait_if_paused,
+            timeout_seconds=retry_seconds,
+        )
 
     def _wait_after_download(
         self,
@@ -1716,7 +1852,6 @@ class GrokAutomationEngine:
             if should_stop():
                 return None
             wait_if_paused()
-            self._dismiss_feedback_popup(page, log)
             remaining = max(0, int(math.ceil(deadline - time.time())))
             if remaining != last_remaining:
                 last_remaining = remaining
@@ -1748,7 +1883,6 @@ class GrokAutomationEngine:
                     set_status(f"{item_tag} 결과 카드 여는 중")
                     trace_action(f"{item_tag} 결과 카드 열기 시도")
                     self._open_latest_result_card(page)
-                    self._dismiss_feedback_popup(page, log)
                     opened_result = True
                     trace_action(f"{item_tag} 결과 카드 열기 성공")
                     next_open_attempt_at = time.time() + reopen_interval

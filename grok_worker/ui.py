@@ -82,6 +82,8 @@ class GrokWorkerApp:
     def _build_vars(self) -> None:
         self.worker_name_var = tk.StringVar()
         self.prompt_slot_var = tk.StringVar()
+        self.prompt_filter_var = tk.StringVar()
+        self.prompt_library_state_var = tk.StringVar(value="공용 0개")
         self.download_dir_var = tk.StringVar()
         self.media_mode_var = tk.StringVar()
         self.video_quality_var = tk.StringVar()
@@ -336,13 +338,33 @@ class GrokWorkerApp:
     def _build_basic_settings(self, parent: tk.Frame) -> None:
         tk.Label(parent, text="기본 설정", bg=self._bg("settings_bg"), fg="#ffffff", font=("Malgun Gothic", 11, "bold")).pack(anchor="w", padx=4, pady=(0, 6))
 
-        self._labeled_combo(parent, "프롬프트 파일", self.prompt_slot_var, self.prompt_slot_changed)
+        prompt_header = tk.Frame(parent, bg=self._bg("settings_bg"))
+        prompt_header.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(prompt_header, text="공용 프롬프트 파일", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(side="left")
+        tk.Label(
+            prompt_header,
+            textvariable=self.prompt_library_state_var,
+            bg=self._bg("chip_bg"),
+            fg=self._bg("chip_fg"),
+            font=("Malgun Gothic", 9, "bold"),
+            padx=10,
+            pady=3,
+        ).pack(side="right")
+
+        filter_row = tk.Frame(parent, bg=self._bg("settings_bg"))
+        filter_row.pack(fill="x", padx=4, pady=(0, 6))
+        tk.Label(filter_row, text="목록 검색", bg=self._bg("settings_bg"), fg="#d8e4ff", font=("Malgun Gothic", 10)).pack(anchor="w")
+        prompt_filter_entry = tk.Entry(filter_row, textvariable=self.prompt_filter_var, font=("Malgun Gothic", 10))
+        prompt_filter_entry.pack(fill="x", pady=(6, 0))
+        self.prompt_filter_var.trace_add("write", lambda *_: self._on_prompt_filter_changed())
+
+        self._labeled_combo(parent, "프롬프트 선택", self.prompt_slot_var, self.prompt_slot_changed)
         prompt_btns = tk.Frame(parent, bg=self._bg("settings_bg"))
         prompt_btns.pack(fill="x", padx=4, pady=(0, 4))
         for col in range(4):
             prompt_btns.grid_columnconfigure(col, weight=1)
         self._action_button(prompt_btns, "파일 열기", self.open_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self._action_button(prompt_btns, "이름수정", self.rename_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
+        self._action_button(prompt_btns, "이름 변경", self.rename_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=1, sticky="ew", padx=6)
         self._action_button(prompt_btns, "삭제", self.delete_prompt_file, self._bg("open_btn_bg"), small=True, width=8).grid(row=0, column=2, sticky="ew", padx=6)
         self._action_button(prompt_btns, "추가", self.add_prompt_file, self._bg("open_btn_bg"), small=True, width=6).grid(row=0, column=3, sticky="ew", padx=(6, 0))
         prompt_summary_row = tk.Frame(parent, bg=self._bg("settings_bg"))
@@ -586,9 +608,9 @@ class GrokWorkerApp:
 
     def _load_vars_from_config(self) -> None:
         self.worker_name_var.set(str(self.forced_worker_name or self.cfg.get("worker_name") or "Grok Worker1"))
-        slots = self.cfg.get("prompt_slots") or []
-        slot_index = max(0, min(int(self.cfg.get("prompt_slot_index", 0) or 0), len(slots) - 1))
-        self.prompt_slot_var.set(str((slots[slot_index] or {}).get("name") or ""))
+        self.prompt_filter_var.set("")
+        selected_file = str(self.cfg.get("selected_prompt_file") or "").strip()
+        self.prompt_slot_var.set(self._prompt_label_for_file(selected_file))
         self.download_dir_var.set(str(self.cfg.get("download_output_dir") or ""))
         self.media_mode_var.set(str(self.cfg.get("media_mode") or "image"))
         self.video_quality_var.set(str(self.cfg.get("video_quality") or "720p"))
@@ -634,9 +656,10 @@ class GrokWorkerApp:
         self.cfg["settings_collapsed"] = bool(self.settings_collapsed)
         self.cfg["log_panel_visible"] = bool(self.log_panel_visible)
 
-        slot_name = self.prompt_slot_var.get().strip()
+        current_slot = self._current_prompt_slot()
+        self.cfg["selected_prompt_file"] = str((current_slot or {}).get("file") or "").strip()
         for idx, slot in enumerate(slots):
-            if str(slot.get("name") or "").strip() == slot_name:
+            if str(slot.get("file") or "").strip() == self.cfg["selected_prompt_file"]:
                 self.cfg["prompt_slot_index"] = idx
                 break
 
@@ -748,10 +771,9 @@ class GrokWorkerApp:
         self.project_summary_var.set(f"사이트: grok.com/imagine | 기존 Edge 연결 | {media_label}")
         self.attach_url_var.set(f"기존 Edge 연결 고정 | {attach_url}")
         self._refresh_browser_profile_ui()
-        slots = self.cfg.get("prompt_slots") or []
-        slot_idx = int(self.cfg.get("prompt_slot_index", 0) or 0)
-        if slots:
-            slot_file = str((slots[slot_idx] or {}).get("file") or "")
+        current_slot = self._current_prompt_slot()
+        if current_slot:
+            slot_file = str((current_slot or {}).get("file") or "")
             slot_path = self.base_dir / slot_file
             summary = summarize_prompt_file(
                 slot_path,
@@ -761,6 +783,8 @@ class GrokWorkerApp:
                 extra_prefixes=("V",) if str(self.cfg.get("media_mode") or "image") == "video" else (),
             )
             self.prompt_file_summary_var.set(self._format_prompt_summary_for_ui(summary))
+        else:
+            self.prompt_file_summary_var.set("프롬프트 파일 없음")
         self._refresh_queue_summary()
         self._refresh_progress_display()
         self.root.title(f"Grok Worker - {self.cfg.get('worker_name', 'Grok Worker1')}")
@@ -768,11 +792,19 @@ class GrokWorkerApp:
     def _refresh_prompt_menu(self) -> None:
         menu = self.prompt_menu["menu"]
         menu.delete(0, "end")
-        values = [str(slot.get("name") or "") for slot in self.cfg.get("prompt_slots") or []]
-        for value in values:
+        all_slots = list(self.cfg.get("prompt_slots") or [])
+        visible_slots = self._filtered_prompt_slots()
+        visible_labels = [self._prompt_label_for_slot(slot) for slot in visible_slots]
+        for value in visible_labels:
             menu.add_command(label=value, command=lambda v=value: self.prompt_slot_var.set(v))
-        if values and self.prompt_slot_var.get() not in values:
-            self.prompt_slot_var.set(values[0])
+        if not visible_labels:
+            menu.add_command(label="검색 결과 없음", command=lambda: None)
+        all_labels = [self._prompt_label_for_slot(slot) for slot in all_slots]
+        if all_labels and self.prompt_slot_var.get().strip() not in all_labels:
+            self.prompt_slot_var.set(all_labels[0])
+        total = len(all_slots)
+        visible = len(visible_slots)
+        self.prompt_library_state_var.set(f"공용 {total}개" if visible == total else f"공용 {total}개 · 검색 {visible}개")
 
     def on_number_mode_changed(self) -> None:
         mode = self.number_mode_var.get().strip()
@@ -798,27 +830,31 @@ class GrokWorkerApp:
         path.write_text("", encoding="utf-8")
         slot = {"name": name.strip(), "file": file_rel}
         self.cfg.setdefault("prompt_slots", []).append(slot)
-        self.prompt_slot_var.set(name.strip())
+        self.prompt_filter_var.set("")
+        self.prompt_slot_var.set(self._prompt_label_for_slot(slot))
         self.auto_save("프롬프트 파일 추가")
         self.refresh_all()
 
     def rename_prompt_file(self) -> None:
-        current = self.prompt_slot_var.get().strip()
-        if not current:
+        current_slot = self._current_prompt_slot()
+        if not current_slot:
             return
+        current = str((current_slot or {}).get("name") or "").strip()
         new_name = simpledialog.askstring("프롬프트 파일 이름 수정", "새 이름을 입력하세요:", parent=self.root, initialvalue=current)
         if not new_name:
             return
         for slot in self.cfg.get("prompt_slots") or []:
-            if str(slot.get("name") or "").strip() == current:
+            if str(slot.get("file") or "").strip() == str((current_slot or {}).get("file") or "").strip():
                 slot["name"] = new_name.strip()
+                current_slot = slot
                 break
-        self.prompt_slot_var.set(new_name.strip())
+        self.prompt_slot_var.set(self._prompt_label_for_slot(current_slot))
         self.auto_save("프롬프트 파일 이름 수정")
         self.refresh_all()
 
     def delete_prompt_file(self) -> None:
-        current = self.prompt_slot_var.get().strip()
+        current_slot = self._current_prompt_slot()
+        current_file = str((current_slot or {}).get("file") or "").strip()
         slots = self.cfg.get("prompt_slots") or []
         if len(slots) <= 1:
             messagebox.showwarning("삭제 불가", "프롬프트 파일은 최소 1개는 남아 있어야 합니다.", parent=self.root)
@@ -826,7 +862,7 @@ class GrokWorkerApp:
         doomed = None
         kept = []
         for slot in slots:
-            if str(slot.get("name") or "").strip() == current and doomed is None:
+            if str(slot.get("file") or "").strip() == current_file and doomed is None:
                 doomed = slot
             else:
                 kept.append(slot)
@@ -836,7 +872,8 @@ class GrokWorkerApp:
                 (self.base_dir / str(doomed.get("file") or "")).unlink(missing_ok=True)
             except Exception:
                 pass
-        self.prompt_slot_var.set(str((kept[0] or {}).get("name") or ""))
+        self.prompt_filter_var.set("")
+        self.prompt_slot_var.set(self._prompt_label_for_slot(kept[0]))
         self.auto_save("프롬프트 파일 삭제")
         self.refresh_all()
 
@@ -1057,11 +1094,64 @@ class GrokWorkerApp:
         self._write_run_log_line(stamped)
 
     def _current_prompt_slot(self) -> dict:
-        current = self.prompt_slot_var.get().strip()
+        current_label = self.prompt_slot_var.get().strip()
         for slot in self.cfg.get("prompt_slots") or []:
-            if str(slot.get("name") or "").strip() == current:
+            if self._prompt_label_for_slot(slot) == current_label:
                 return slot
         return (self.cfg.get("prompt_slots") or [{}])[0]
+
+    def _prompt_slot_display_pairs(self) -> list[tuple[str, dict]]:
+        slots = list(self.cfg.get("prompt_slots") or [])
+        name_counts: dict[str, int] = {}
+        for idx, slot in enumerate(slots, start=1):
+            slot_name = str((slot or {}).get("name") or f"프롬프트 파일 {idx}").strip() or f"프롬프트 파일 {idx}"
+            name_counts[slot_name] = name_counts.get(slot_name, 0) + 1
+        pairs: list[tuple[str, dict]] = []
+        used_labels: set[str] = set()
+        for idx, slot in enumerate(slots, start=1):
+            slot_name = str((slot or {}).get("name") or f"프롬프트 파일 {idx}").strip() or f"프롬프트 파일 {idx}"
+            file_name = Path(str((slot or {}).get("file") or "")).name or f"slot_{idx}.txt"
+            label = slot_name if name_counts.get(slot_name, 0) == 1 else f"{slot_name}  [{file_name}]"
+            if label in used_labels:
+                label = f"{label} #{idx}"
+            used_labels.add(label)
+            pairs.append((label, slot))
+        return pairs
+
+    def _prompt_label_for_slot(self, target_slot: dict | None) -> str:
+        target_file = str((target_slot or {}).get("file") or "").strip()
+        for label, slot in self._prompt_slot_display_pairs():
+            if str((slot or {}).get("file") or "").strip() == target_file:
+                return label
+        return str((target_slot or {}).get("name") or "").strip()
+
+    def _prompt_label_for_file(self, target_file: str) -> str:
+        normalized = str(target_file or "").strip()
+        for label, slot in self._prompt_slot_display_pairs():
+            if str((slot or {}).get("file") or "").strip() == normalized:
+                return label
+        pairs = self._prompt_slot_display_pairs()
+        return pairs[0][0] if pairs else ""
+
+    def _filtered_prompt_slots(self) -> list[dict]:
+        slots = list(self.cfg.get("prompt_slots") or [])
+        query = self._normalize_prompt_search(self.prompt_filter_var.get())
+        if not query:
+            return slots
+        return [
+            slot
+            for slot in slots
+            if query in self._normalize_prompt_search(str((slot or {}).get("name") or ""))
+            or query in self._normalize_prompt_search(Path(str((slot or {}).get("file") or "")).stem)
+        ]
+
+    def _normalize_prompt_search(self, text: str) -> str:
+        return re.sub(r"[\s._-]+", "", str(text or "")).casefold()
+
+    def _on_prompt_filter_changed(self) -> None:
+        if not hasattr(self, "prompt_menu"):
+            return
+        self._refresh_prompt_menu()
 
     def _int_or_default(self, value, default: int) -> int:
         try:
